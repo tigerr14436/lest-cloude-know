@@ -3,9 +3,9 @@
 
 from datetime import datetime
 from uuid import UUID
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
-from typing import Literal
 
 
 KnowledgeType = Literal[
@@ -16,6 +16,9 @@ KnowledgeType = Literal[
     "technical",
     "meeting_note",
 ]
+
+SubtaskPriority = Literal["low", "medium", "high"]
+ProposalStatus = Literal["pending", "confirmed", "rejected"]
 
 
 class AIProjectProfileBase(BaseModel):
@@ -42,6 +45,7 @@ class AIProjectProfileResponse(AIProjectProfileBase):
     updated_by: UUID | None = None
     created_at: datetime
     updated_at: datetime
+
 
 class AIKnowledgeCreate(BaseModel):
     title: str = Field(min_length=1, max_length=255)
@@ -105,3 +109,49 @@ class AIChatSendRequest(BaseModel):
         min_length=1,
         max_length=10000,
     )
+
+
+class AISubtaskProposalItem(BaseModel):
+    """Một Subtask do AI đề xuất."""
+
+    title: str = Field(min_length=1, max_length=255)
+    description: str | None = None
+    priority: SubtaskPriority = "medium"
+
+
+class AISubtaskProposalResponse(BaseModel):
+    """Thông tin đề xuất Subtask."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    conversation_id: UUID
+    message_id: UUID
+    user_id: UUID
+    project_id: UUID
+    task_id: UUID
+    group_id: UUID
+    items: list[AISubtaskProposalItem]
+    status: ProposalStatus
+    created_subtask_ids: list[UUID] | None = None
+    created_at: datetime
+    confirmed_at: datetime | None = None
+    rejected_at: datetime | None = None
+
+
+class AISubtaskProposalUpdate(BaseModel):
+    """Nội dung người dùng chỉnh sửa trước khi xác nhận."""
+
+    items: list[AISubtaskProposalItem] = Field(
+        min_length=1,
+        max_length=20,
+    )
+
+
+class AISubtaskProposalActionResponse(BaseModel):
+    """Kết quả xác nhận hoặc từ chối đề xuất."""
+
+    proposal_id: UUID
+    status: Literal["confirmed", "rejected"]
+    created_subtask_ids: list[UUID] = Field(default_factory=list)
+    message: str

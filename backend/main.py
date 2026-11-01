@@ -8,12 +8,12 @@ Không cần xóa dữ liệu cũ để bổ sung bảng project_repositories.
 """
 from ai.knowledge_router import router as ai_knowledge_router
 from ai.profile_router import router as ai_profile_router
-from ai.models import AIProjectProfile , AIKnowledgeItem 
 from ai.models import (
     AIProjectProfile,
     AIKnowledgeItem,
     AIConversation,
     AIMessage,
+    AIActionProposal,
 )
 from ai.chat_router import router as ai_chat_router
 from ai.router import router as ai_router

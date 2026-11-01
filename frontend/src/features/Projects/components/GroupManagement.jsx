@@ -1,962 +1,1302 @@
-import React, { useState, useEffect } from 'react';
+
+import React, { useCallback, useEffect, useState } from 'react';
 import GroupKanbanBoard from './GroupKanbanBoard';
-import { Users, Plus, Lock, Crown, Trash2, Shield, Mail, CheckCircle, Search, LayoutGrid, List, Clock, ArrowLeft, MessageSquare, Send, UserPlus } from 'lucide-react';
+import AIChatPanel from './AIChatPanel';
+
+import {
+  Users,
+  Plus,
+  Lock,
+  Crown,
+  Trash2,
+  Shield,
+  Mail,
+  CheckCircle,
+  Search,
+  LayoutGrid,
+  List,
+  Clock,
+  ArrowLeft,
+  Bot,
+  MessageSquare
+} from 'lucide-react';
+
+const API_BASE = 'http://127.0.0.1:8000';
 
 async function groupRequest(projectId, path = '', options = {}) {
   const token = localStorage.getItem('access_token');
-  if (!token) throw new Error('Bạn cần đăng nhập lại');
-  const res = await fetch(`http://127.0.0.1:8000/api/projects/${encodeURIComponent(projectId)}/groups${path}`, {
-    ...options, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...options.headers }
-  });
-  if (res.status === 204) return null;
-  const data = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(typeof data?.detail === 'string' ? data.detail : 'Thao tác thất bại');
+
+  if (!token) {
+    throw new Error('Bạn cần đăng nhập lại.');
+  }
+
+  const response = await fetch(
+    `${API_BASE}/api/projects/${encodeURIComponent(projectId)}/groups${path}`,
+    {
+      ...options,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        ...options.headers
+      }
+    }
+  );
+
+  if (response.status === 204) {
+    return null;
+  }
+
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new Error(
+      typeof data?.detail === 'string'
+        ? data.detail
+        : 'Không thể thực hiện thao tác.'
+    );
+  }
+
   return data;
 }
 
-export default function GroupManagement({ projectId, groups = [], setGroups, projectMembers = [], isProjectOwner = false,
-  currentUserId, currentUserName = '', currentUserEmail = '', projectTasks = [], showNotification }) {
+const buttonStyle = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: '7px',
+  padding: '9px 14px',
+  borderRadius: '8px',
+  border: '1px solid #334155',
+  cursor: 'pointer',
+  fontSize: '13px',
+  fontWeight: 600
+};
+
+const cardStyle = {
+  background: '#1e293b',
+  border: '1px solid #334155',
+  borderRadius: '14px',
+  padding: '16px'
+};
+
+export default function GroupManagement({
+  projectId,
+  groups = [],
+  setGroups,
+  projectMembers = [],
+  isProjectOwner = false,
+  currentUserId,
+  currentUserName = '',
+  currentUserEmail = '',
+  projectTasks = [],
+  showNotification
+}) {
   const [newGroupName, setNewGroupName] = useState('');
   const [searchKeyword, setSearchKeyword] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
   const [viewMode, setViewMode] = useState('grid');
+
   const [selectedGroupId, setSelectedGroupId] = useState(null);
   const [kanbanGroupId, setKanbanGroupId] = useState(null);
-  const selectedGroup = groups.find(g => g.id === selectedGroupId) || null;
-  const setSelectedGroup = (g) => { setSelectedGroupId(g?.id || null); setKanbanGroupId(null); };
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [groupMessages] = useState({}); // Chưa có API chat; không tạo dữ liệu giả
-  const [chatInput, setChatInput] = useState('');
+  const [activeGroupTab, setActiveGroupTab] = useState('discussion');
+
+  const [inviteMemberId, setInviteMemberId] = useState('');
   const [saving, setSaving] = useState(false);
-  const isLeaderOfGroup = g => !!g && (isProjectOwner || (!!currentUserId && g.leader_id === currentUserId));
-  const notifyError = e => showNotification?.('loi', 'Không thực hiện được', e.message);
-  const reload = async () => {
+  const [loadingGroups, setLoadingGroups] = useState(false);
+
+  const selectedGroup =
+    groups.find(group => group.id === selectedGroupId) || null;
+
+  const notifyError = error => {
+    showNotification?.(
+      'loi',
+      'Không thực hiện được',
+      error.message || 'Đã xảy ra lỗi.'
+    );
+  };
+
+  const isLeaderOfGroup = group => {
+    return Boolean(
+      group &&
+      (
+        isProjectOwner ||
+        (
+          currentUserId &&
+          group.leader_id === currentUserId
+        )
+      )
+    );
+  };
+
+  const reload = useCallback(async () => {
     if (!projectId) return;
-    const data = await groupRequest(projectId);
-    setGroups(Array.isArray(data) ? data : []);
+
+    setLoadingGroups(true);
+
+    try {
+      const data = await groupRequest(projectId);
+
+      setGroups(Array.isArray(data) ? data : []);
+    } finally {
+      setLoadingGroups(false);
+    }
+  }, [projectId, setGroups]);
+
+  useEffect(() => {
+    setSelectedGroupId(null);
+    setKanbanGroupId(null);
+    setActiveGroupTab('discussion');
+    setInviteMemberId('');
+
+    reload().catch(notifyError);
+  }, [projectId]);
+
+  const selectGroup = group => {
+    setSelectedGroupId(group?.id || null);
+    setKanbanGroupId(null);
+    setActiveGroupTab('discussion');
+    setInviteMemberId('');
   };
-  useEffect(() => { setSelectedGroupId(null); setKanbanGroupId(null); setInviteEmail(''); reload().catch(notifyError); }, [projectId]);
-  const mutate = async (fn, message) => {
+
+  const mutate = async (callback, successMessage) => {
     if (saving) return;
+
     setSaving(true);
-    try { await fn(); await reload(); showNotification?.('thanh-cong', 'Thành công', message); }
-    catch (e) { notifyError(e); }
-    finally { setSaving(false); }
+
+    try {
+      await callback();
+      await reload();
+
+      showNotification?.(
+        'thanh-cong',
+        'Thành công',
+        successMessage
+      );
+    } catch (error) {
+      notifyError(error);
+    } finally {
+      setSaving(false);
+    }
   };
-  const handleCreateGroup = e => {
-    e.preventDefault();
+
+  // Tạo nhóm
+  const handleCreateGroup = async event => {
+    event.preventDefault();
+
     const name = newGroupName.trim();
+
     if (!isProjectOwner || !name) return;
-    mutate(async () => { await groupRequest(projectId, '', {method:'POST',body:JSON.stringify({name})}); setNewGroupName(''); }, `Đã tạo nhóm "${name}"`);
+
+    await mutate(
+      async () => {
+        await groupRequest(projectId, '', {
+          method: 'POST',
+          body: JSON.stringify({ name })
+        });
+
+        setNewGroupName('');
+      },
+      `Đã tạo nhóm "${name}".`
+    );
   };
-  const handleAssignLeader = (groupId, userId) => {
+
+  // Chỉ định trưởng nhóm
+  const handleAssignLeader = async (groupId, userId) => {
     if (!isProjectOwner) return;
-    mutate(() => groupRequest(projectId, `/${groupId}/leader`, {method:'PUT',body:JSON.stringify({user_id:userId || null})}), 'Đã cập nhật trưởng nhóm');
+
+    await mutate(
+      () =>
+        groupRequest(projectId, `/${groupId}/leader`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            user_id: userId || null
+          })
+        }),
+      'Đã cập nhật trưởng nhóm.'
+    );
   };
-  const handleSendInvite = groupId => {
-    const group = groups.find(g => g.id === groupId);
+
+  // Thêm thành viên
+  const handleAddMember = async groupId => {
+    const group = groups.find(item => item.id === groupId);
+
     if (!isLeaderOfGroup(group)) return;
-    const member = projectMembers.find(m => m.id === inviteEmail);
-    if (!member) return showNotification?.('loi', 'Chưa chọn thành viên', 'Vui lòng chọn thành viên đã tham gia dự án.');
-    mutate(async () => {
-      await groupRequest(projectId, `/${groupId}/members`, {method:'POST',body:JSON.stringify({user_id:member.id})});
-      setInviteEmail('');
-    }, `Đã thêm ${member.name} vào nhóm`);
+
+    const member = projectMembers.find(
+      item => item.id === inviteMemberId
+    );
+
+    if (!member) {
+      showNotification?.(
+        'loi',
+        'Chưa chọn thành viên',
+        'Vui lòng chọn thành viên đã tham gia dự án.'
+      );
+      return;
+    }
+
+    await mutate(
+      async () => {
+        await groupRequest(
+          projectId,
+          `/${groupId}/members`,
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              user_id: member.id
+            })
+          }
+        );
+
+        setInviteMemberId('');
+      },
+      `Đã thêm ${member.name} vào nhóm.`
+    );
   };
-  const handleRemoveMember = (groupId, memberId) => {
-    const group = groups.find(g => g.id === groupId);
-    if (!isLeaderOfGroup(group) || group?.leader_id === memberId) return;
-    if (!window.confirm('Gỡ thành viên khỏi nhóm?')) return;
-    mutate(() => groupRequest(projectId, `/${groupId}/members/${memberId}`, {method:'DELETE'}), 'Đã gỡ thành viên khỏi nhóm');
+
+  // Gỡ thành viên
+  const handleRemoveMember = async (groupId, memberId) => {
+    const group = groups.find(item => item.id === groupId);
+
+    if (
+      !isLeaderOfGroup(group) ||
+      group?.leader_id === memberId
+    ) {
+      return;
+    }
+
+    if (!window.confirm('Bạn có chắc muốn gỡ thành viên này khỏi nhóm?')) {
+      return;
+    }
+
+    await mutate(
+      () =>
+        groupRequest(
+          projectId,
+          `/${groupId}/members/${memberId}`,
+          { method: 'DELETE' }
+        ),
+      'Đã gỡ thành viên khỏi nhóm.'
+    );
   };
-  const handleDeleteGroup = (groupId, groupName) => {
-    if (!isProjectOwner || !window.confirm(`Bạn có chắc muốn xóa nhóm "${groupName}" không?`)) return;
-    mutate(async () => { await groupRequest(projectId, `/${groupId}`, {method:'DELETE'}); setSelectedGroup(null); }, `Đã xóa nhóm "${groupName}"`);
+
+  // Xóa nhóm
+  const handleDeleteGroup = async (groupId, groupName) => {
+    if (!isProjectOwner) return;
+
+    if (
+      !window.confirm(
+        `Bạn có chắc muốn xóa nhóm "${groupName}" không?`
+      )
+    ) {
+      return;
+    }
+
+    await mutate(
+      async () => {
+        await groupRequest(
+          projectId,
+          `/${groupId}`,
+          { method: 'DELETE' }
+        );
+
+        if (selectedGroupId === groupId) {
+          setSelectedGroupId(null);
+          setKanbanGroupId(null);
+        }
+      },
+      `Đã xóa nhóm "${groupName}".`
+    );
   };
-  const handleSendMessage = e => {
-    e.preventDefault();
-    showNotification?.('can-bao', 'Chat chưa được kích hoạt', 'Cần bổ sung API và bảng lưu tin nhắn để sử dụng chat nội bộ.');
-  };
+
+  // Tìm kiếm và lọc nhóm
   const filteredGroups = groups.filter(group => {
-    const matchesKeyword = group.name.toLowerCase().includes(searchKeyword.toLowerCase()) || (group.leader || '').toLowerCase().includes(searchKeyword.toLowerCase());
-    const matchesRole = roleFilter === 'all' || (roleFilter === 'leader' && group.leader_id === currentUserId) || (roleFilter === 'unassigned' && !group.leader_id);
+    const keyword = searchKeyword.toLowerCase();
+
+    const matchesKeyword =
+      (group.name || '').toLowerCase().includes(keyword) ||
+      (group.leader || '').toLowerCase().includes(keyword);
+
+    const matchesRole =
+      roleFilter === 'all' ||
+      (
+        roleFilter === 'leader' &&
+        group.leader_id === currentUserId
+      ) ||
+      (
+        roleFilter === 'unassigned' &&
+        !group.leader_id
+      );
+
     return matchesKeyword && matchesRole;
   });
-  const availableMembers = selectedGroup ? projectMembers.filter(m => !(selectedGroup.members || []).some(x => x.id === m.id)) : [];
 
-  return (
+  // Thành viên chưa thuộc nhóm
+  const availableMembers = selectedGroup
+    ? projectMembers.filter(member =>
+        !(selectedGroup.members || []).some(
+          item => item.id === member.id
+        )
+      )
+    : [];
 
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', paddingBottom: '30px' }}>
+  // =====================================================
+  // GIAO DIỆN CHI TIẾT NHÓM
+  // =====================================================
 
+  if (selectedGroup && kanbanGroupId === selectedGroup.id) {
+    return (
+      <GroupKanbanBoard
+        projectId={projectId}
+        group={selectedGroup}
+        projectTasks={projectTasks}
+        currentUserId={currentUserId}
+        isProjectOwner={isProjectOwner}
+        showNotification={showNotification}
+        onBack={() => setKanbanGroupId(null)}
+      />
+    );
+  }
 
+  if (selectedGroup) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '18px',
+          paddingBottom: '30px'
+        }}
+      >
+        {/* Quay lại danh sách nhóm */}
+        <button
+          type="button"
+          onClick={() => selectGroup(null)}
+          style={{
+            ...buttonStyle,
+            width: 'fit-content',
+            background: '#1e293b',
+            color: '#38bdf8'
+          }}
+        >
+          <ArrowLeft size={16} />
+          Quay lại danh sách nhóm
+        </button>
 
-      {/* ================= SECTION CHI TIẾT NHÓM (XUẤT HIỆN KHI BẤM VÀO NHÓM) ================= */}
-
-      {selectedGroup && kanbanGroupId === selectedGroup.id ? (
-        <GroupKanbanBoard
-          projectId={projectId}
-          group={selectedGroup}
-          projectTasks={projectTasks}
-          currentUserId={currentUserId}
-          isProjectOwner={isProjectOwner}
-          showNotification={showNotification}
-          onBack={() => setKanbanGroupId(null)}
-        />
-      ) : selectedGroup ? (
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-
-
-
-          {/* Nút quay lại danh sách nhóm */}
-
-          <button
-
-            onClick={() => setSelectedGroup(null)}
-
+        {/* Header nhóm */}
+        <div
+          style={{
+            ...cardStyle,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '15px'
+          }}
+        >
+          <div
             style={{
-
-              display: 'inline-flex',
-
+              display: 'flex',
               alignItems: 'center',
-
-              gap: '8px',
-
-              background: '#1e293b',
-
-              color: '#38bdf8',
-
-              border: '1px solid #334155',
-
-              padding: '8px 16px',
-
-              borderRadius: '8px',
-
-              fontSize: '13px',
-
-              fontWeight: 600,
-
-              cursor: 'pointer',
-
-              width: 'fit-content'
-
+              gap: '14px'
             }}
-
           >
-
-            <ArrowLeft size={16} /> Quay lại Danh sách Nhóm
-
-          </button>
-
-
-
-          {/* Header nhóm chi tiết */}
-
-          <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '16px', padding: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-
-              <div style={{ width: '48px', height: '48px', background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '20px' }}>
-
-                {selectedGroup.name.charAt(0).toUpperCase()}
-
-              </div>
-
-              <div>
-
-                <h3 style={{ color: '#f8fafc', fontSize: '20px', margin: '0 0 4px 0', fontWeight: 700 }}>{selectedGroup.name}</h3>
-
-                <span style={{ fontSize: '13px', color: '#94a3b8' }}>
-
-                  Chi tiết phân quyền & Thảo luận nội bộ nhóm
-
-                </span>
-
-              </div>
-
+            <div
+              style={{
+                width: '48px',
+                height: '48px',
+                background: 'rgba(56, 189, 248, 0.15)',
+                color: '#38bdf8',
+                borderRadius: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: 'bold',
+                fontSize: '20px'
+              }}
+            >
+              {(selectedGroup.name || 'G').charAt(0).toUpperCase()}
             </div>
 
+            <div>
+              <h3
+                style={{
+                  color: '#f8fafc',
+                  fontSize: '20px',
+                  margin: '0 0 5px'
+                }}
+              >
+                {selectedGroup.name}
+              </h3>
 
+              <span style={{ color: '#94a3b8', fontSize: '12px' }}>
+                Quản lý nhóm và trợ lý AI dự án
+              </span>
+            </div>
+          </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              flexWrap: 'wrap'
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setKanbanGroupId(selectedGroup.id)}
+              style={{
+                ...buttonStyle,
+                background: '#4f46e5',
+                borderColor: '#6366f1',
+                color: '#fff'
+              }}
+            >
+              <LayoutGrid size={16} />
+              Mở Kanban
+            </button>
+
+            {isProjectOwner && (
               <button
                 type="button"
-                onClick={() => setKanbanGroupId(selectedGroup.id)}
-                style={{ background: '#4f46e5', border: '1px solid #6366f1', color: '#fff', padding: '9px 14px', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '7px', fontSize: '13px', fontWeight: 600 }}
+                onClick={() =>
+                  handleDeleteGroup(
+                    selectedGroup.id,
+                    selectedGroup.name
+                  )
+                }
+                disabled={saving}
+                style={{
+                  ...buttonStyle,
+                  background: 'rgba(239,68,68,0.1)',
+                  borderColor: 'rgba(239,68,68,0.3)',
+                  color: '#f87171'
+                }}
               >
-                <LayoutGrid size={16} /> Mở Kanban của nhóm
+                <Trash2 size={16} />
+                Xóa nhóm
               </button>
-              {isProjectOwner && (
-
-              <button
-
-                onClick={() => handleDeleteGroup(selectedGroup.id, selectedGroup.name)}
-
-                style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', color: '#f87171', padding: '8px 14px', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
-
-              >
-
-                <Trash2 size={16} /> Xóa Nhóm
-
-              </button>
-
             )}
-            </div>
-
           </div>
-
-
-
-          {/* Bố cục 2 cột: Cột trái (Trưởng nhóm + Thành viên) - Cột phải (Chat Nội Bộ) */}
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '20px' }}>
-
-
-
-            {/* CỘT T TRÁI: QUẢN LÝ PHÂN QUYỀN & THÀNH VIÊN */}
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-
-
-
-              {/* 1. Trưởng nhóm phụ trách */}
-
-              <div style={{ background: '#1e293b', padding: '16px', borderRadius: '16px', border: '1px solid #334155' }}>
-
-                <div style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-
-                  <Crown size={16} style={{ color: '#fbbf24' }} /> Trưởng nhóm phụ trách:
-
-                </div>
-
-
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', background: '#0f172a', padding: '12px', borderRadius: '10px', border: '1px solid #334155' }}>
-
-                  <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: '#38bdf8', color: '#0f172a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '16px', overflow: 'hidden', flexShrink: 0 }}>
-
-                    {selectedGroup.leaderAvatar && selectedGroup.leaderAvatar.startsWith('http') ? (
-
-                      <img src={selectedGroup.leaderAvatar} alt="Avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-
-                    ) : (
-
-                      <span>{selectedGroup.leader ? selectedGroup.leader.charAt(0).toUpperCase() : "?"}</span>
-
-                    )}
-
-                  </div>
-
-                  <div>
-
-                    <div style={{ color: '#f8fafc', fontSize: '15px', fontWeight: 'bold' }}>
-
-                      {selectedGroup.leader || "Chưa phân công"}
-
-                    </div>
-
-                    {selectedGroup.leaderEmail && (
-
-                      <div style={{ color: '#94a3b8', fontSize: '12px' }}>{selectedGroup.leaderEmail}</div>
-
-                    )}
-
-                  </div>
-
-                </div>
-
-
-
-                {isProjectOwner && (
-
-                  <div style={{ marginTop: '12px' }}>
-
-                    <label style={{ fontSize: '12px', color: '#64748b', display: 'block', marginBottom: '6px' }}>
-
-                      Chỉ định Trưởng nhóm mới:
-
-                    </label>
-
-                    <select
-
-                      value={selectedGroup.leader_id || ""}
-
-                      onChange={(e) => handleAssignLeader(selectedGroup.id, e.target.value)}
-
-                      style={{ width: '100%', background: '#0f172a', color: '#fff', border: '1px solid #334155', padding: '10px', borderRadius: '8px', fontSize: '13px', outline: 'none' }}
-
-                    >
-
-                      <option value="">-- Chọn thành viên làm Leader --</option>
-
-                      {projectMembers.map((member) => (
-
-                        <option key={member.id} value={member.id}>
-
-                          {member.name} {member.email ? `(${member.email})` : ''}
-
-                        </option>
-
-                      ))}
-
-                    </select>
-
-                  </div>
-
-                )}
-
-              </div>
-
-
-
-              {/* 2. Danh sách thành viên & Mời thành viên */}
-
-              <div style={{ background: '#1e293b', padding: '16px', borderRadius: '16px', border: '1px solid #334155', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-
-                  <span style={{ fontSize: '14px', color: '#34d399', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
-
-                    <Users size={16} /> Danh Sách Thành Viên ({selectedGroup.members?.length || 0})
-
-                  </span>
-
-                </div>
-
-
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '200px', overflowY: 'auto' }}>
-
-                  {selectedGroup.members && selectedGroup.members.length > 0 ? (
-
-                    selectedGroup.members.map((member) => {
-
-                      const isMe = member.id === currentUserId;
-
-
-
-                      return (
-
-                        <div key={member.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#0f172a', padding: '8px 12px', borderRadius: '8px', fontSize: '13px', color: '#f8fafc', border: '1px solid #334155' }}>
-
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-
-                            <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: '#64748b', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 'bold' }}>
-
-                              {member.name ? member.name.charAt(0).toUpperCase() : "U"}
-
-                            </div>
-
-                            <div>
-
-                              <span style={{ fontWeight: 500 }}>{member.name} {isMe && "(Tôi)"}</span>
-
-                              <div style={{ fontSize: '11px', color: '#94a3b8' }}>{member.email}</div>
-
-                            </div>
-
-                          </div>
-
-
-
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-
-                            {member.status === 'accepted' ? (
-
-                              <span style={{ fontSize: '11px', color: '#34d399', background: 'rgba(52, 211, 153, 0.1)', padding: '2px 8px', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '3px' }}>
-
-                                <CheckCircle size={12} /> Đã vào nhóm
-
-                              </span>
-
-                            ) : member.status === 'pending_invite' ? (
-
-                              isMe ? (
-
-                                <div style={{ display: 'flex', gap: '4px' }}>
-
-                                  <button
-
-                                    disabled
-
-                                    style={{ background: '#10b981', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer', fontWeight: 'bold' }}
-
-                                  >
-
-                                    Đồng ý
-
-                                  </button>
-
-                                  <button
-
-                                    disabled
-
-                                    style={{ background: '#ef4444', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer' }}
-
-                                  >
-
-                                    Từ chối
-
-                                  </button>
-
-                                </div>
-
-                              ) : (
-
-                                <span style={{ fontSize: '11px', color: '#fbbf24', background: 'rgba(245, 158, 11, 0.1)', padding: '2px 8px', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '3px' }}>
-
-                                  <Clock size={12} /> Chờ phản hồi
-
-                                </span>
-
-                              )
-
-                            ) : (
-
-                              <span style={{ fontSize: '11px', color: '#ef4444', background: 'rgba(239, 68, 68, 0.1)', padding: '2px 8px', borderRadius: '4px' }}>
-
-                                Đã từ chối
-
-                              </span>
-
-                            )}
-
-
-
-                            {isLeaderOfGroup(selectedGroup) && member.id !== selectedGroup.leader_id && (
-
-                              <button
-
-                                onClick={() => handleRemoveMember(selectedGroup.id, member.id)}
-
-                                style={{ background: 'transparent', border: 'none', color: '#f87171', cursor: 'pointer', padding: '4px' }}
-
-                                title="Gỡ khỏi nhóm"
-
-                              >
-
-                                <Trash2 size={14} />
-
-                              </button>
-
-                            )}
-
-                          </div>
-
-                        </div>
-
-                      );
-
-                    })
-
-                  ) : (
-
-                    <span style={{ fontSize: '12px', color: '#64748b', fontStyle: 'italic' }}>Chưa có thành viên nào.</span>
-
-                  )}
-
-                </div>
-
-
-
-                {isLeaderOfGroup(selectedGroup) && (
-
-                  <div style={{ borderTop: '1px solid #334155', paddingTop: '12px', marginTop: '4px' }}>
-
-                    <label style={{ fontSize: '12px', color: '#94a3b8', display: 'block', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-
-                      <Mail size={14} /> Thêm thành viên đã tham gia dự án:
-
-                    </label>
-
-                    <div style={{ display: 'flex', gap: '8px' }}>
-
-                      <select value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)}
-                        style={{ flex: 1, background: '#0f172a', color: '#fff', border: '1px solid #334155', padding: '8px 12px', borderRadius: '8px', fontSize: '13px', outline: 'none' }}>
-                        <option value="">-- Chọn thành viên trong dự án --</option>
-                        {availableMembers.map(m => <option key={m.id} value={m.id}>{m.name}{m.email ? ` (${m.email})` : ''}</option>)}
-                      </select>
-
-                      <button
-
-                        type="button"
-
-                        onClick={() => handleSendInvite(selectedGroup.id)}
-
-                        style={{ background: '#38bdf8', color: '#0f172a', border: 'none', padding: '8px 16px', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer' }}
-
-                      >
-
-                        Thêm
-
-                      </button>
-
-                    </div>
-
-                  </div>
-
-                )}
-
-              </div>
-
-
-
-            </div>
-
-
-
-            {/* CỘT PHẢI: KHUNG CHAT NỘI BỘ DÀNH RIÊNG CHO NHÓM NÀY */}
-
-            <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '16px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', height: '420px' }}>
-
-              <div style={{ fontSize: '15px', color: '#34d399', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid #334155', paddingBottom: '10px' }}>
-
-                <MessageSquare size={18} /> Thảo Luận Nội Bộ - {selectedGroup.name}
-
-              </div>
-
-
-
-              {/* Danh sách tin nhắn */}
-
-              <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', paddingRight: '4px' }}>
-
-                {(groupMessages[selectedGroup.id] || []).length > 0 ? (
-
-                  groupMessages[selectedGroup.id].map((msg) => {
-
-                    const laToi = msg.sender === currentUserName;
-
-                    return (
-
-                      <div key={msg.id} style={{ display: 'flex', flexDirection: 'column', alignItems: laToi ? 'flex-end' : 'flex-start' }}>
-
-                        <span style={{ fontSize: '10px', color: '#64748b', marginBottom: '2px' }}>{msg.sender} • {msg.time}</span>
-
-                        <div style={{ 
-
-                          background: laToi ? 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)' : '#0f172a', 
-
-                          color: '#f8fafc', 
-
-                          padding: '8px 12px', 
-
-                          borderRadius: '10px', 
-
-                          fontSize: '13px',
-
-                          border: laToi ? 'none' : '1px solid #334155',
-
-                          maxWidth: '80%',
-
-                          wordBreak: 'break-word'
-
-                        }}>
-
-                          {msg.text}
-
-                        </div>
-
-                      </div>
-
-                    );
-
-                  })
-
-                ) : (
-
-                  <div style={{ textAlign: 'center', color: '#64748b', fontSize: '12px', marginTop: 'auto', marginBottom: 'auto', fontStyle: 'italic' }}>
-
-                    Chat nội bộ chưa kết nối Backend. Tin nhắn sẽ được hỗ trợ ở giai đoạn tiếp theo.
-
-                  </div>
-
-                )}
-
-              </div>
-
-
-
-              {/* Input nhắn tin */}
-
-              <form onSubmit={handleSendMessage} style={{ display: 'flex', gap: '8px', borderTop: '1px solid #334155', paddingTop: '10px' }}>
-
-                <input
-
-                  type="text"
-
-                  placeholder="Chat sẽ hoạt động sau khi có API lưu tin nhắn" disabled
-
-                  value={chatInput}
-
-                  onChange={(e) => setChatInput(e.target.value)}
-
-                  style={{ flex: 1, background: '#0f172a', border: '1px solid #334155', borderRadius: '8px', padding: '8px 12px', color: '#f8fafc', fontSize: '13px', outline: 'none' }}
-
-                />
-
-                <button type="submit" disabled style={{ background: '#10b981', border: 'none', color: '#fff', width: '36px', height: '36px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
-
-                  <Send size={15} />
-
-                </button>
-
-              </form>
-
-            </div>
-
-
-
-          </div>
-
-
-
         </div>
 
-      ) : (
+        {/* Tabs */}
+        <div
+          style={{
+            display: 'flex',
+            gap: '8px',
+            borderBottom: '1px solid #334155',
+            paddingBottom: '10px'
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setActiveGroupTab('discussion')}
+            style={{
+              ...buttonStyle,
+              background:
+                activeGroupTab === 'discussion'
+                  ? '#334155'
+                  : 'transparent',
+              color:
+                activeGroupTab === 'discussion'
+                  ? '#fff'
+                  : '#94a3b8'
+            }}
+          >
+            <Users size={16} />
+            Thành viên và phân quyền
+          </button>
 
-        /* ================= SECTION DANH SÁCH TẤT CẢ CÁC NHÓM ================= */
+          <button
+            type="button"
+            onClick={() => setActiveGroupTab('ai')}
+            style={{
+              ...buttonStyle,
+              background:
+                activeGroupTab === 'ai'
+                  ? '#4f46e5'
+                  : 'transparent',
+              borderColor:
+                activeGroupTab === 'ai'
+                  ? '#6366f1'
+                  : '#334155',
+              color:
+                activeGroupTab === 'ai'
+                  ? '#fff'
+                  : '#94a3b8'
+            }}
+          >
+            <Bot size={16} />
+            AI Chat
+          </button>
+        </div>
 
-        <>
+        {/* TAB AI CHAT */}
+        {activeGroupTab === 'ai' && (
+          <AIChatPanel
+            projectId={projectId}
+            projectName={selectedGroup.name}
+          />
+        )}
 
-          {/* KHUNG TẠO NHÓM MỚI */}
-
-          <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '16px', padding: '20px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}>
-
-            <h4 style={{ color: '#f8fafc', fontSize: '16px', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px', margin: '0 0 12px 0' }}>
-
-              <Users size={20} style={{ color: '#38bdf8' }} /> Khởi Tạo Nhóm Làm Việc Mới
-
-            </h4>
-
-
-
-            {isProjectOwner ? (
-
-              <form onSubmit={handleCreateGroup} style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-
-                <div className="nhom-nhap-lieu" style={{ flex: 1, minWidth: '240px', margin: 0 }}>
-
-                  <Users size={16} className="bieu-tuong-input" />
-
-                  <input
-
-                    type="text"
-
-                    placeholder="Nhập tên nhóm (VD: Nhóm Frontend, Đội DevOps...)"
-
-                    value={newGroupName}
-
-                    onChange={(e) => setNewGroupName(e.target.value)}
-
-                    className="o-nhap-lieu"
-
-                    required
-
-                    style={{ width: '100%' }}
-
-                  />
-
-                </div>
-
-                <button type="submit" className="nut-chinh" style={{ padding: '10px 20px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-
-                  <Plus size={16} /> Tạo Nhóm Ngay
-
-                </button>
-
-              </form>
-
-            ) : (
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#94a3b8', fontSize: '13px', background: '#0f172a', padding: '10px 14px', borderRadius: '8px', border: '1px solid #334155' }}>
-
-                <Lock size={15} style={{ color: '#fbbf24', flexShrink: 0 }} />
-
-                <span>Chỉ có <strong>Chủ dự án (Owner)</strong> mới có quyền khởi tạo nhóm mới và chỉ định Trưởng nhóm.</span>
-
+        {/* TAB QUẢN LÝ THÀNH VIÊN */}
+        {activeGroupTab === 'discussion' && (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns:
+                'repeat(auto-fit, minmax(300px, 1fr))',
+              gap: '18px'
+            }}
+          >
+            {/* Trưởng nhóm */}
+            <div
+              style={{
+                ...cardStyle,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '14px'
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  color: '#fbbf24',
+                  fontSize: '14px',
+                  fontWeight: 600
+                }}
+              >
+                <Crown size={17} />
+                Trưởng nhóm phụ trách
               </div>
 
-            )}
-
-          </div>
-
-
-
-          {/* THANH CÔNG CỤ & DANH SÁCH NHÓM */}
-
-          <div className="khung-danh-sach-du-an" style={{ background: 'transparent', padding: 0, border: 'none' }}>
-
-            <div className="thanh-tieu-de-section" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '16px' }}>
-
-
-
-              <div className="nhom-tieu-de" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-
-                <Shield size={20} className="icon-tieu-de" style={{ color: '#34d399' }} />
-
-                <h3 style={{ color: '#f8fafc', fontSize: '18px', margin: 0 }}>Danh Sách Nhóm Trong Dự Án ({filteredGroups.length})</h3>
-
-              </div>
-
-
-
-              <div className="nhom-cong-cu" style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-
-                <div className="khung-tim-kiem" style={{ display: 'flex', alignItems: 'center', background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', padding: '6px 12px', gap: '8px' }}>
-
-                  <Search size={16} className="icon-tim-kiem" style={{ color: '#94a3b8' }} />
-
-                  <input
-
-                    type="text"
-
-                    placeholder="Tìm kiếm nhóm hoặc trưởng nhóm..."
-
-                    value={searchKeyword}
-
-                    onChange={(e) => setSearchKeyword(e.target.value)}
-
-                    style={{ background: 'transparent', border: 'none', color: '#f8fafc', outline: 'none', fontSize: '13px' }}
-
-                  />
-
-                </div>
-
-
-
-                <select
-
-                  className="bo-loc-select"
-
-                  value={roleFilter}
-
-                  onChange={(e) => setRoleFilter(e.target.value)}
-
-                  style={{ background: '#1e293b', color: '#f8fafc', border: '1px solid #334155', padding: '8px 12px', borderRadius: '8px', fontSize: '13px', outline: 'none', cursor: 'pointer' }}
-
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  background: '#0f172a',
+                  padding: '12px',
+                  borderRadius: '10px',
+                  border: '1px solid #334155'
+                }}
+              >
+                <div
+                  style={{
+                    width: '40px',
+                    height: '40px',
+                    borderRadius: '50%',
+                    background: '#38bdf8',
+                    color: '#0f172a',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontWeight: 'bold'
+                  }}
                 >
-
-                  <option value="all">Tất cả nhóm</option>
-
-                  <option value="leader">Nhóm tôi phụ trách</option>
-
-                  <option value="unassigned">Chưa phân công trưởng nhóm</option>
-
-                </select>
-
-
-
-                <div className="chuyen-che-do-xem" style={{ display: 'flex', background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', overflow: 'hidden' }}>
-
-                  <button
-
-                    className={`nut-che-do ${viewMode === "grid" ? "dang-chon" : ""}`}
-
-                    onClick={() => setViewMode("grid")}
-
-                    style={{ background: viewMode === "grid" ? '#334155' : 'transparent', border: 'none', color: '#f8fafc', padding: '8px 10px', cursor: 'pointer' }}
-
-                  >
-
-                    <LayoutGrid size={16} />
-
-                  </button>
-
-                  <button
-
-                    className={`nut-che-do ${viewMode === "list" ? "dang-chon" : ""}`}
-
-                    onClick={() => setViewMode("list")}
-
-                    style={{ background: viewMode === "list" ? '#334155' : 'transparent', border: 'none', color: '#f8fafc', padding: '8px 10px', cursor: 'pointer' }}
-
-                  >
-
-                    <List size={16} />
-
-                  </button>
-
+                  {selectedGroup.leader
+                    ? selectedGroup.leader.charAt(0).toUpperCase()
+                    : '?'}
                 </div>
 
+                <div>
+                  <div
+                    style={{
+                      color: '#f8fafc',
+                      fontSize: '14px',
+                      fontWeight: 600
+                    }}
+                  >
+                    {selectedGroup.leader || 'Chưa phân công'}
+                  </div>
+
+                  {selectedGroup.leaderEmail && (
+                    <div
+                      style={{
+                        color: '#94a3b8',
+                        fontSize: '11px'
+                      }}
+                    >
+                      {selectedGroup.leaderEmail}
+                    </div>
+                  )}
+                </div>
               </div>
 
+              {isProjectOwner && (
+                <div>
+                  <label
+                    style={{
+                      display: 'block',
+                      color: '#94a3b8',
+                      fontSize: '12px',
+                      marginBottom: '7px'
+                    }}
+                  >
+                    Chỉ định trưởng nhóm mới
+                  </label>
+
+                  <select
+                    value={selectedGroup.leader_id || ''}
+                    onChange={event =>
+                      handleAssignLeader(
+                        selectedGroup.id,
+                        event.target.value
+                      )
+                    }
+                    disabled={saving}
+                    style={{
+                      width: '100%',
+                      background: '#0f172a',
+                      color: '#fff',
+                      border: '1px solid #334155',
+                      padding: '10px',
+                      borderRadius: '8px'
+                    }}
+                  >
+                    <option value="">
+                      -- Chọn thành viên --
+                    </option>
+
+                    {projectMembers.map(member => (
+                      <option key={member.id} value={member.id}>
+                        {member.name}
+                        {member.email ? ` (${member.email})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
 
-
-
-            {filteredGroups.length === 0 ? (
-
-              <div style={{ textAlign: 'center', padding: '40px', background: '#1e293b', border: '1px solid #334155', borderRadius: '16px', color: '#94a3b8' }}>
-
-                <Users size={36} style={{ marginBottom: '8px', opacity: 0.5 }} />
-
-                <p style={{ margin: 0 }}>Không tìm thấy nhóm nào phù hợp.</p>
-
+            {/* Thành viên */}
+            <div
+              style={{
+                ...cardStyle,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '12px'
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  color: '#34d399',
+                  fontSize: '14px',
+                  fontWeight: 600
+                }}
+              >
+                <Users size={17} />
+                Thành viên ({selectedGroup.members?.length || 0})
               </div>
 
-            ) : viewMode === "grid" ? (
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px',
+                  maxHeight: '320px',
+                  overflowY: 'auto'
+                }}
+              >
+                {selectedGroup.members?.length > 0 ? (
+                  selectedGroup.members.map(member => {
+                    const isMe = member.id === currentUserId;
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: '20px' }}>
-
-                {filteredGroups.map((group) => {
-
-                  return (
-
-                    <div 
-
-                      key={group.id} 
-
-                      onClick={() => setSelectedGroup(group)}
-
-                      style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '16px', padding: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', transition: 'all 0.2s ease', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}
-
-                      className="the-nhom-item"
-
-                    >
-
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-
-                        <div style={{ width: '42px', height: '42px', background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '18px' }}>
-
-                          {group.name.charAt(0).toUpperCase()}
-
-                        </div>
-
-                        <div>
-
-                          <h5 style={{ color: '#f8fafc', fontSize: '16px', margin: '0 0 4px 0', fontWeight: 600 }}>{group.name}</h5>
-
-                          <span style={{ fontSize: '12px', color: '#94a3b8' }}>
-
-                            Trưởng nhóm: <strong style={{ color: '#fbbf24' }}>{group.leader || "Chưa phân công"}</strong> • {group.members?.length || 0} thành viên
-
-                          </span>
-
-                        </div>
-
-                      </div>
-
-
-
-                      {isProjectOwner && (
-
-                        <button
-
-                          onClick={(e) => {
-
-                            e.stopPropagation();
-
-                            handleDeleteGroup(group.id, group.name);
-
+                    return (
+                      <div
+                        key={member.id}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          gap: '8px',
+                          background: '#0f172a',
+                          padding: '10px',
+                          borderRadius: '8px',
+                          border: '1px solid #334155'
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '9px',
+                            minWidth: 0
                           }}
-
-                          style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', color: '#f87171', padding: '6px 8px', borderRadius: '8px', cursor: 'pointer' }}
-
-                          title="Xóa nhóm"
-
                         >
+                          <div
+                            style={{
+                              width: '30px',
+                              height: '30px',
+                              flexShrink: 0,
+                              borderRadius: '50%',
+                              background: '#475569',
+                              color: '#fff',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center'
+                            }}
+                          >
+                            {(member.name || 'U')
+                              .charAt(0)
+                              .toUpperCase()}
+                          </div>
 
-                          <Trash2 size={15} />
+                          <div style={{ minWidth: 0 }}>
+                            <div
+                              style={{
+                                color: '#f8fafc',
+                                fontSize: '12px'
+                              }}
+                            >
+                              {member.name}
+                              {isMe ? ' (Tôi)' : ''}
+                            </div>
 
-                        </button>
-
-                      )}
-
-                    </div>
-
-                  );
-
-                })}
-
-              </div>
-
-            ) : (
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-
-                {filteredGroups.map((group) => {
-
-                  return (
-
-                    <div 
-
-                      key={group.id} 
-
-                      onClick={() => setSelectedGroup(group)}
-
-                      style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
-
-                    >
-
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-
-                        <div style={{ width: '40px', height: '40px', background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '16px' }}>
-
-                          {group.name.charAt(0).toUpperCase()}
-
+                            <div
+                              style={{
+                                color: '#94a3b8',
+                                fontSize: '10px'
+                              }}
+                            >
+                              {member.email}
+                            </div>
+                          </div>
                         </div>
 
-                        <div>
-
-                          <h5 style={{ color: '#f8fafc', fontSize: '15px', margin: '0 0 4px 0', fontWeight: 600 }}>{group.name}</h5>
-
-                          <span style={{ fontSize: '12px', color: '#fbbf24' }}>
-
-                            Trưởng nhóm: {group.leader || "Chưa phân công"} • Thành viên: {group.members?.length || 0}
-
-                          </span>
-
-                        </div>
-
-                      </div>
-
-
-
-                      {isProjectOwner && (
-
-                        <button
-
-                          onClick={(e) => {
-
-                            e.stopPropagation();
-
-                            handleDeleteGroup(group.id, group.name);
-
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px'
                           }}
-
-                          style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', color: '#f87171', padding: '8px', borderRadius: '8px', cursor: 'pointer' }}
-
-                          title="Xóa nhóm"
-
                         >
+                          {member.status === 'accepted' ? (
+                            <span
+                              style={{
+                                color: '#34d399',
+                                fontSize: '10px'
+                              }}
+                            >
+                              <CheckCircle size={13} />
+                            </span>
+                          ) : member.status === 'pending_invite' ? (
+                            <span
+                              style={{
+                                color: '#fbbf24',
+                                fontSize: '10px'
+                              }}
+                            >
+                              <Clock size={13} />
+                            </span>
+                          ) : null}
 
-                          <Trash2 size={15} />
-
-                        </button>
-
-                      )}
-
-                    </div>
-
-                  );
-
-                })}
-
+                          {isLeaderOfGroup(selectedGroup) &&
+                            member.id !== selectedGroup.leader_id && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleRemoveMember(
+                                    selectedGroup.id,
+                                    member.id
+                                  )
+                                }
+                                disabled={saving}
+                                title="Gỡ thành viên"
+                                style={{
+                                  background: 'transparent',
+                                  border: 'none',
+                                  color: '#f87171',
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            )}
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <p
+                    style={{
+                      color: '#64748b',
+                      fontSize: '12px'
+                    }}
+                  >
+                    Nhóm chưa có thành viên.
+                  </p>
+                )}
               </div>
 
-            )}
+              {/* Thêm thành viên */}
+              {isLeaderOfGroup(selectedGroup) && (
+                <div
+                  style={{
+                    borderTop: '1px solid #334155',
+                    paddingTop: '12px'
+                  }}
+                >
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      color: '#94a3b8',
+                      fontSize: '12px',
+                      marginBottom: '8px'
+                    }}
+                  >
+                    <Mail size={14} />
+                    Thêm thành viên dự án
+                  </label>
 
+                  <div
+                    style={{
+                      display: 'flex',
+                      gap: '8px',
+                      flexWrap: 'wrap'
+                    }}
+                  >
+                    <select
+                      value={inviteMemberId}
+                      onChange={event =>
+                        setInviteMemberId(event.target.value)
+                      }
+                      style={{
+                        flex: 1,
+                        minWidth: '150px',
+                        background: '#0f172a',
+                        color: '#fff',
+                        border: '1px solid #334155',
+                        padding: '9px',
+                        borderRadius: '8px'
+                      }}
+                    >
+                      <option value="">
+                        -- Chọn thành viên --
+                      </option>
+
+                      {availableMembers.map(member => (
+                        <option key={member.id} value={member.id}>
+                          {member.name}
+                          {member.email ? ` (${member.email})` : ''}
+                        </option>
+                      ))}
+                    </select>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleAddMember(selectedGroup.id)
+                      }
+                      disabled={saving || !inviteMemberId}
+                      style={{
+                        ...buttonStyle,
+                        background: '#38bdf8',
+                        color: '#0f172a',
+                        borderColor: '#38bdf8'
+                      }}
+                    >
+                      <Plus size={15} />
+                      Thêm
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Thông tin thảo luận */}
+            <div
+              style={{
+                ...cardStyle,
+                gridColumn: '1 / -1',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px'
+              }}
+            >
+              <MessageSquare size={20} color="#38bdf8" />
+
+              <div>
+                <div
+                  style={{
+                    color: '#f8fafc',
+                    fontSize: '13px',
+                    fontWeight: 600
+                  }}
+                >
+                  Thảo luận nội bộ
+                </div>
+
+                <div
+                  style={{
+                    color: '#94a3b8',
+                    fontSize: '12px',
+                    marginTop: '4px'
+                  }}
+                >
+                  Chức năng chat nội bộ nhóm chưa được kết nối API.
+                  Bạn có thể sử dụng AI Chat ở tab bên cạnh.
+                </div>
+              </div>
+            </div>
           </div>
+        )}
+      </div>
+    );
+  }
 
-        </>
+  // =====================================================
+  // GIAO DIỆN DANH SÁCH NHÓM
+  // =====================================================
 
-      )}
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '22px',
+        paddingBottom: '30px'
+      }}
+    >
+      {/* Tạo nhóm */}
+      <div style={cardStyle}>
+        <h3
+          style={{
+            color: '#f8fafc',
+            fontSize: '16px',
+            margin: '0 0 14px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}
+        >
+          <Users size={19} color="#38bdf8" />
+          Khởi tạo nhóm làm việc mới
+        </h3>
 
+        {isProjectOwner ? (
+          <form
+            onSubmit={handleCreateGroup}
+            style={{
+              display: 'flex',
+              gap: '10px',
+              flexWrap: 'wrap'
+            }}
+          >
+            <input
+              type="text"
+              value={newGroupName}
+              onChange={event =>
+                setNewGroupName(event.target.value)
+              }
+              placeholder="Nhập tên nhóm..."
+              required
+              style={{
+                flex: 1,
+                minWidth: '220px',
+                background: '#0f172a',
+                color: '#fff',
+                border: '1px solid #334155',
+                padding: '11px',
+                borderRadius: '8px'
+              }}
+            />
 
+            <button
+              type="submit"
+              disabled={saving || !newGroupName.trim()}
+              style={{
+                ...buttonStyle,
+                background: '#4f46e5',
+                color: '#fff'
+              }}
+            >
+              <Plus size={16} />
+              Tạo nhóm
+            </button>
+          </form>
+        ) : (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              color: '#94a3b8',
+              fontSize: '13px'
+            }}
+          >
+            <Lock size={16} color="#fbbf24" />
+            Chỉ Owner mới có quyền tạo nhóm.
+          </div>
+        )}
+      </div>
 
+      {/* Danh sách nhóm */}
+      <div>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '12px',
+            marginBottom: '16px'
+          }}
+        >
+          <h3
+            style={{
+              color: '#f8fafc',
+              fontSize: '18px',
+              margin: 0,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px'
+            }}
+          >
+            <Shield size={19} color="#34d399" />
+            Danh sách nhóm ({filteredGroups.length})
+          </h3>
+
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: '8px'
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '7px',
+                background: '#1e293b',
+                border: '1px solid #334155',
+                borderRadius: '8px',
+                padding: '8px 10px'
+              }}
+            >
+              <Search size={15} color="#94a3b8" />
+
+              <input
+                value={searchKeyword}
+                onChange={event =>
+                  setSearchKeyword(event.target.value)
+                }
+                placeholder="Tìm nhóm..."
+                style={{
+                  width: '150px',
+                  background: 'transparent',
+                  color: '#fff',
+                  border: 'none',
+                  outline: 'none',
+                  fontSize: '12px'
+                }}
+              />
+            </div>
+
+            <select
+              value={roleFilter}
+              onChange={event =>
+                setRoleFilter(event.target.value)
+              }
+              style={{
+                background: '#1e293b',
+                color: '#f8fafc',
+                border: '1px solid #334155',
+                padding: '9px',
+                borderRadius: '8px',
+                fontSize: '12px'
+              }}
+            >
+              <option value="all">Tất cả nhóm</option>
+              <option value="leader">Nhóm tôi phụ trách</option>
+              <option value="unassigned">
+                Chưa có trưởng nhóm
+              </option>
+            </select>
+
+            <button
+              type="button"
+              onClick={() => setViewMode('grid')}
+              style={{
+                ...buttonStyle,
+                padding: '8px',
+                background:
+                  viewMode === 'grid' ? '#334155' : '#1e293b',
+                color: '#fff'
+              }}
+              title="Dạng lưới"
+            >
+              <LayoutGrid size={16} />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setViewMode('list')}
+              style={{
+                ...buttonStyle,
+                padding: '8px',
+                background:
+                  viewMode === 'list' ? '#334155' : '#1e293b',
+                color: '#fff'
+              }}
+              title="Dạng danh sách"
+            >
+              <List size={16} />
+            </button>
+          </div>
+        </div>
+
+        {loadingGroups ? (
+          <div
+            style={{
+              ...cardStyle,
+              textAlign: 'center',
+              color: '#94a3b8'
+            }}
+          >
+            Đang tải danh sách nhóm...
+          </div>
+        ) : filteredGroups.length === 0 ? (
+          <div
+            style={{
+              ...cardStyle,
+              textAlign: 'center',
+              color: '#94a3b8',
+              padding: '40px'
+            }}
+          >
+            <Users size={32} />
+            <p>Không tìm thấy nhóm nào.</p>
+          </div>
+        ) : (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns:
+                viewMode === 'grid'
+                  ? 'repeat(auto-fill, minmax(280px, 1fr))'
+                  : '1fr',
+              gap: '14px'
+            }}
+          >
+            {filteredGroups.map(group => (
+              <div
+                key={group.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => selectGroup(group)}
+                onKeyDown={event => {
+                  if (event.key === 'Enter') {
+                    selectGroup(group);
+                  }
+                }}
+                style={{
+                  ...cardStyle,
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: '12px',
+                  cursor: 'pointer',
+                  transition: 'border-color 0.2s'
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    minWidth: 0
+                  }}
+                >
+                  <div
+                    style={{
+                      width: '42px',
+                      height: '42px',
+                      flexShrink: 0,
+                      background: 'rgba(56,189,248,0.15)',
+                      color: '#38bdf8',
+                      borderRadius: '10px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '18px',
+                      fontWeight: 'bold'
+                    }}
+                  >
+                    {(group.name || 'G')
+                      .charAt(0)
+                      .toUpperCase()}
+                  </div>
+
+                  <div style={{ minWidth: 0 }}>
+                    <h4
+                      style={{
+                        color: '#f8fafc',
+                        fontSize: '14px',
+                        margin: '0 0 5px'
+                      }}
+                    >
+                      {group.name}
+                    </h4>
+
+                    <div
+                      style={{
+                        color: '#94a3b8',
+                        fontSize: '11px'
+                      }}
+                    >
+                      Trưởng nhóm: {group.leader || 'Chưa phân công'}
+                    </div>
+
+                    <div
+                      style={{
+                        color: '#64748b',
+                        fontSize: '11px',
+                        marginTop: '4px'
+                      }}
+                    >
+                      {group.members?.length || 0} thành viên
+                    </div>
+                  </div>
+                </div>
+
+                {isProjectOwner && (
+                  <button
+                    type="button"
+                    onClick={event => {
+                      event.stopPropagation();
+
+                      handleDeleteGroup(group.id, group.name);
+                    }}
+                    title="Xóa nhóm"
+                    style={{
+                      background: 'rgba(239,68,68,0.1)',
+                      border: '1px solid rgba(239,68,68,0.25)',
+                      color: '#f87171',
+                      padding: '8px',
+                      borderRadius: '8px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
-
   );
-
 }
