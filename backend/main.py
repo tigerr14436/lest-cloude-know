@@ -6,6 +6,17 @@ Chạy server bằng lệnh:
 Lưu ý: create_all() tạo bảng mới, không tự sửa bảng đã tồn tại.
 Không cần xóa dữ liệu cũ để bổ sung bảng project_repositories.
 """
+from ai.knowledge_router import router as ai_knowledge_router
+from ai.profile_router import router as ai_profile_router
+from ai.models import AIProjectProfile , AIKnowledgeItem 
+from ai.models import (
+    AIProjectProfile,
+    AIKnowledgeItem,
+    AIConversation,
+    AIMessage,
+)
+from ai.chat_router import router as ai_chat_router
+from ai.router import router as ai_router
 import uuid
 import random
 import string
@@ -40,6 +51,10 @@ from models import (
     ProjectRepositoryOut,
 )
 app = FastAPI(title="Quản lý công việc & dự án CNTT API")
+app.include_router(ai_chat_router)
+app.include_router(ai_knowledge_router)
+app.include_router(ai_profile_router)
+app.include_router(ai_router)
 app.include_router(email_verification_router)
 app.include_router(project_groups_router)
 app.include_router(group_kanban_router)
