@@ -534,12 +534,15 @@ export default function GroupManagement({
         </div>
 
         {/* TAB AI CHAT */}
-        {activeGroupTab === 'ai' && (
-          <AIChatPanel
-            projectId={projectId}
-            projectName={selectedGroup.name}
-          />
-        )}
+{activeGroupTab === 'ai' && (
+  <AIChatPanel
+    projectId={projectId}
+    projectName={selectedGroup.name}
+    groups={groups}
+    currentUserId={currentUserId}
+    isProjectOwner={isProjectOwner}
+  />
+)}
 
         {/* TAB QUẢN LÝ THÀNH VIÊN */}
         {activeGroupTab === 'discussion' && (
