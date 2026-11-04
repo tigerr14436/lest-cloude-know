@@ -1,95 +1,135 @@
-# 🚀 DevTask - Website Quản Lý Công Việc & Dự Án CNTT
+# DevTask – Hệ thống quản lý công việc và dự án CNTT
 
-## 📌 Giới thiệu
+DevTask là ứng dụng web hỗ trợ quản lý dự án, công việc và cộng tác nhóm dành cho các nhóm phát triển phần mềm. Hệ thống cung cấp các công cụ theo dõi tiến độ, quản lý thành viên, tổ chức công việc theo nhóm và hỗ trợ AI trong quá trình triển khai dự án.
 
-**DevTask** là ứng dụng web hỗ trợ quản lý công việc và dự án dành cho các nhóm phát triển phần mềm.
+## 1. Công nghệ sử dụng
 
-Hệ thống được xây dựng nhằm hỗ trợ các thành viên trong nhóm quản lý công việc, theo dõi tiến độ dự án, tổ chức Workspace và quản lý thành viên trong quá trình phát triển phần mềm.
+| Thành phần | Công nghệ |
+|---|---|
+| Frontend | React 19, Vite 8, JavaScript |
+| Điều hướng | React Router 7 |
+| Biểu tượng | Lucide React |
+| Backend | Python, FastAPI |
+| ORM | SQLAlchemy 2 |
+| Kiểm tra dữ liệu | Pydantic 2 |
+| Database | PostgreSQL |
+| Driver PostgreSQL | asyncpg |
+| Xác thực | JWT, Passlib, bcrypt |
+| Gửi email | Gmail SMTP |
+| AI | Ollama, Qwen 2.5 |
+| Giao tiếp HTTP với AI | HTTPX |
+| Quản lý mã nguồn | Git, GitHub |
 
-Dự án được thực hiện theo định hướng **Agile/Scrum**, trong đó các chức năng được phát triển và hoàn thiện qua từng Sprint.
+## 2. Chức năng chính
 
----
+### 2.1. Tài khoản và xác thực
+- Đăng ký và đăng nhập.
+- Xác minh email bằng mã OTP.
+- Xác thực người dùng bằng JWT.
+- Quản lý hồ sơ cá nhân.
+- Phân quyền truy cập các chức năng theo tài khoản và vai trò.
 
-## 🎯 Mục tiêu của hệ thống
+### 2.2. Quản lý dự án
+- Tạo và quản lý dự án.
+- Cập nhật thông tin dự án.
+- Tham gia dự án bằng mã tham gia.
+- Quản lý thành viên và vai trò trong dự án.
+- Liên kết kho mã nguồn GitHub với dự án.
 
-DevTask hướng đến các chức năng chính:
+### 2.3. Quản lý công việc
+- Tạo, xem, chỉnh sửa và xóa Task.
+- Theo dõi trạng thái và mức độ ưu tiên.
+- Quản lý người phụ trách và thời hạn.
+- Phân nhóm công việc.
+- Quản lý Subtask.
+- Theo dõi công việc trên giao diện Kanban.
+- Hỗ trợ theo dõi tiến độ thực hiện.
 
-- Đăng ký tài khoản người dùng.
-- Đăng nhập và xác thực bằng JWT.
-- Quản lý thông tin người dùng.
-- Quản lý công việc (Task).
-- Tạo, xem, cập nhật và xóa công việc.
-- Theo dõi trạng thái công việc.
-- Quản lý mức độ ưu tiên của công việc.
-- Quản lý người phụ trách công việc.
-- Quản lý dự án.
-- Quản lý Workspace và nhóm làm việc.
-- Quản lý thành viên trong Workspace.
-- Hỗ trợ theo dõi tiến độ dự án.
+### 2.4. Quản lý chi phí dự án
+- Thiết lập ngân sách dự kiến.
+- Quản lý ngày bắt đầu và ngày kết thúc.
+- Tạo và chỉnh sửa danh mục chi phí.
+- Quản lý các khoản chi thực tế.
+- Tính tổng chi phí thực tế và ngân sách còn lại.
+- Phân quyền chỉnh sửa chi phí cho chủ dự án.
 
-Một số chức năng Project và Workspace hiện đang tiếp tục được hoàn thiện trong các Sprint tiếp theo.
+### 2.5. Hỗ trợ trí tuệ nhân tạo
+- Trò chuyện với Project AI.
+- Khai thác thông tin và ngữ cảnh của dự án.
+- Quản lý Knowledge Base.
+- Quản lý hồ sơ AI của dự án.
+- Đề xuất chia nhỏ Task thành Subtask.
+- Xem xét và chấp nhận hoặc từ chối đề xuất từ AI.
 
----
+## 3. Kiến trúc hệ thống
 
-# 🛠 Công nghệ sử dụng
+Hệ thống sử dụng mô hình Frontend – Backend – Database:
 
-## Frontend
+```text
+             NGƯỜI DÙNG
+                  |
+                  v
+       FRONTEND - REACT + VITE
+          localhost:5173
+                  |
+             HTTP / REST API
+                  |
+                  v
+          BACKEND - FASTAPI
+          localhost:8000
+                  |
+          +-------+-------+
+          |               |
+          v               v
+     POSTGRESQL         OLLAMA
+     Database           Qwen 2.5
+          |
+          v
+     Lưu trữ dữ liệu
+```
 
-- React
-- Vite
-- React Router
-- JavaScript
-- Fetch API
-- Lucide React
-- CSS
+Frontend chịu trách nhiệm hiển thị giao diện và gửi yêu cầu đến Backend.
 
-## Backend
+Backend xử lý nghiệp vụ, xác thực, phân quyền và truy xuất dữ liệu.
 
-- Python
-- FastAPI
-- SQLAlchemy
-- Pydantic
-- Uvicorn
+PostgreSQL lưu trữ thông tin tài khoản, dự án, công việc, chi phí và dữ liệu liên quan.
 
-## Database
+Ollama cung cấp mô hình AI phục vụ các chức năng hỗ trợ quản lý dự án.
 
-- PostgreSQL
-
-## Authentication
-
-- JSON Web Token (JWT)
-- Passlib
-- Bcrypt
-- Python-JOSE
-
----
-
-# 📂 Cấu trúc dự án
+## 4. Cấu trúc thư mục
 
 ```text
 project-managenemt/
 │
 ├── backend/
+│   ├── ai/
+│   │   ├── providers/
+│   │   ├── services/
+│   │   ├── chat_router.py
+│   │   ├── knowledge_router.py
+│   │   ├── profile_router.py
+│   │   ├── models.py
+│   │   └── schemas.py
+│   │
 │   ├── main.py
 │   ├── database.py
 │   ├── models.py
 │   ├── auth_utils.py
 │   ├── auth_deps.py
-│   ├── .env
-│   └── ...
+│   ├── email_service.py
+│   ├── email_verification.py
+│   ├── project_costs.py
+│   ├── project_groups.py
+│   ├── group_kanban.py
+│   ├── subtask_focus.py
+│   ├── name_tags.py
+│   ├── .env.example
+│   └── requirements.txt
 │
 ├── frontend/
-│   ├── lib/
-│   │   └── api.js
-│   │
 │   ├── src/
 │   │   ├── components/
 │   │   ├── features/
-│   │   │   ├── Auth/
-│   │   │   ├── DashBoard/
-│   │   │   ├── Projects/
-│   │   │   └── Workspaces/
-│   │   │
 │   │   ├── routes/
 │   │   ├── App.jsx
 │   │   └── main.jsx
@@ -101,110 +141,38 @@ project-managenemt/
 └── .gitignore
 ```
 
----
+## 5. Yêu cầu môi trường
 
-# ⚙️ Yêu cầu trước khi cài đặt
+Trước khi cài đặt dự án, cần chuẩn bị:
 
-Trước khi chạy dự án, máy tính cần cài đặt các phần mềm sau.
+| Phần mềm | Phiên bản khuyến nghị | Mục đích |
+|---|---|---|
+| Python | 3.12 | Chạy Backend |
+| Node.js | 22 LTS | Chạy Frontend |
+| npm | Đi kèm Node.js | Cài package Frontend |
+| PostgreSQL | 15 trở lên | Lưu trữ dữ liệu |
+| Git | Phiên bản ổn định mới | Quản lý mã nguồn |
+| Ollama | Phiên bản hiện hành | Chạy mô hình AI, nếu sử dụng AI |
 
-## 1. Git
+Có thể dùng Visual Studio Code và pgAdmin 4 để hỗ trợ phát triển, quản lý mã nguồn và cơ sở dữ liệu.
 
-Git được sử dụng để tải source code từ GitHub.
+## 6. Clone dự án từ GitHub
 
-Kiểm tra Git:
-
-```bash
-git --version
-```
-
-Nếu lệnh trả về phiên bản Git thì Git đã được cài đặt.
-
----
-
-## 2. Python
-
-Backend sử dụng Python.
-
-Khuyến nghị:
-
-```text
-Python 3.10 trở lên
-```
-
-Kiểm tra:
-
-```bash
-python --version
-```
-
-hoặc:
-
-```bash
-py --version
-```
-
----
-
-## 3. Node.js và npm
-
-Frontend React/Vite cần Node.js.
-
-Khuyến nghị:
-
-```text
-Node.js 18 trở lên
-```
-
-Kiểm tra:
-
-```bash
-node --version
-npm --version
-```
-
----
-
-## 4. PostgreSQL
-
-Dự án sử dụng PostgreSQL để lưu dữ liệu.
-
-Cần cài:
-
-```text
-PostgreSQL
-```
-
-Có thể sử dụng **pgAdmin 4** để quản lý database trực quan.
-
----
-
-## 5. Visual Studio Code
-
-Khuyến nghị sử dụng VS Code để mở và chỉnh sửa source code.
-
-Đây không phải yêu cầu bắt buộc. Có thể sử dụng IDE khác nếu muốn.
-
----
-
-# 📥 1. Tải source code từ GitHub
-
-Mở Terminal, PowerShell hoặc Command Prompt và chạy:
+Mở PowerShell hoặc Terminal:
 
 ```bash
 git clone https://github.com/tigerr14436/project-managenemt.git
 ```
 
-Sau đó truy cập thư mục:
+Di chuyển vào thư mục dự án:
 
 ```bash
 cd project-managenemt
 ```
 
----
+## 7. Cấu hình PostgreSQL
 
-# 🗄️ 2. Cấu hình PostgreSQL
-
-Sau khi cài PostgreSQL, tạo một database cho dự án.
+Mỗi thành viên sử dụng PostgreSQL trên máy cá nhân và tự tạo database.
 
 Ví dụ:
 
@@ -212,585 +180,344 @@ Ví dụ:
 CREATE DATABASE project_management;
 ```
 
-Thông tin database ví dụ:
+Thông tin kết nối mẫu:
 
 ```text
 Host: localhost
 Port: 5432
 Database: project_management
 Username: postgres
-Password: mật khẩu PostgreSQL của bạn
+Password: Mật khẩu PostgreSQL của máy
 ```
 
----
+Tên database có thể thay đổi, miễn là thông tin trong biến môi trường `DATABASE_URL` khớp với cấu hình thực tế.
 
-# 🔐 3. Cấu hình biến môi trường Backend
+## 8. Cấu hình Backend
 
-Truy cập thư mục:
+### 8.1. Tạo môi trường ảo
 
-```bash
+Mở Terminal:
+
+```powershell
 cd backend
 ```
 
-Tạo file:
+Tạo môi trường ảo:
 
-```text
-.env
+```powershell
+python -m venv .venv
 ```
 
-Ví dụ nội dung:
+Kích hoạt:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+Nếu PowerShell không cho phép chạy script kích hoạt, có thể dùng Command Prompt:
+
+```cmd
+.venv\Scripts\activate.bat
+```
+
+### 8.2. Cài đặt thư viện
+
+```powershell
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+### 8.3. Tạo file môi trường
+
+Sao chép file mẫu:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Mở `backend/.env` và cập nhật thông tin:
 
 ```env
 DATABASE_URL=postgresql+asyncpg://postgres:YOUR_PASSWORD@localhost:5432/project_management
 
-JWT_SECRET_KEY=YOUR_SECRET_KEY
+JWT_SECRET_KEY=YOUR_RANDOM_SECRET_KEY_AT_LEAST_32_CHARACTERS
+
+OTP_PEPPER=YOUR_RANDOM_OTP_PEPPER_AT_LEAST_32_CHARACTERS
+
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_EMAIL=your_email@gmail.com
+SMTP_APP_PASSWORD=your_gmail_app_password
+
+DATABASE_ECHO=false
 ```
 
-Thay:
+Thay các giá trị mẫu bằng thông tin riêng của từng máy.
 
-```text
-YOUR_PASSWORD
+Lưu ý:
+- `DATABASE_URL`: thông tin kết nối PostgreSQL.
+- `JWT_SECRET_KEY`: khóa bí mật ký JWT, tối thiểu 32 ký tự.
+- `OTP_PEPPER`: khóa bí mật dùng để tạo mã băm OTP, tối thiểu 32 ký tự.
+- `SMTP_EMAIL`: tài khoản Gmail dùng gửi mã xác minh.
+- `SMTP_APP_PASSWORD`: Gmail App Password, không phải mật khẩu đăng nhập Gmail.
+- Không chia sẻ hoặc commit file `.env` lên GitHub.
+
+## 9. Chạy Backend
+
+Đảm bảo đang ở thư mục `backend` và đã kích hoạt môi trường ảo.
+
+Chạy lệnh:
+
+```powershell
+python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-bằng mật khẩu PostgreSQL trên máy.
-
-Thay:
-
-```text
-YOUR_SECRET_KEY
-```
-
-bằng một chuỗi bí mật dùng để ký JWT.
-
-Ví dụ môi trường phát triển:
-
-```env
-DATABASE_URL=postgresql+asyncpg://postgres:123456@localhost:5432/project_management
-
-JWT_SECRET_KEY=devtask-local-secret-key
-```
-
-> Không nên đưa file `.env` thật lên GitHub vì file này có thể chứa mật khẩu database và khóa JWT.
-
----
-
-# 🐍 4. Cài đặt Backend
-
-Từ thư mục:
-
-```text
-project-managenemt/backend
-```
-
-Tạo môi trường ảo Python:
-
-```bash
-python -m venv venv
-```
-
-## Windows
-
-Kích hoạt môi trường:
-
-```bash
-venv\Scripts\activate
-```
-
-## macOS/Linux
-
-```bash
-source venv/bin/activate
-```
-
-Sau khi kích hoạt thành công, terminal thường hiển thị:
-
-```text
-(venv)
-```
-
----
-
-# 📦 5. Cài thư viện Backend
-
-Nếu dự án có `requirements.txt`:
-
-```bash
-pip install -r requirements.txt
-```
-
-Nếu chưa có `requirements.txt`, có thể cài các thư viện cần thiết:
-
-```bash
-pip install fastapi uvicorn sqlalchemy asyncpg pydantic email-validator python-dotenv python-jose passlib bcrypt
-```
-
-Các thư viện chính:
-
-| Thư viện | Chức năng |
-|---|---|
-| FastAPI | Xây dựng REST API |
-| Uvicorn | Chạy FastAPI server |
-| SQLAlchemy | ORM làm việc với database |
-| asyncpg | Kết nối PostgreSQL bất đồng bộ |
-| Pydantic | Kiểm tra dữ liệu request/response |
-| email-validator | Kiểm tra định dạng email |
-| python-dotenv | Đọc biến môi trường `.env` |
-| python-jose | Tạo và xác thực JWT |
-| passlib | Xử lý mã hóa mật khẩu |
-| bcrypt | Hash mật khẩu |
-
----
-
-# ▶️ 6. Chạy Backend
-
-Đảm bảo Terminal đang ở:
-
-```text
-project-managenemt/backend
-```
-
-Chạy:
-
-```bash
-uvicorn main:app --reload --port 8000
-```
-
-Nếu thành công sẽ xuất hiện thông báo tương tự:
-
-```text
-Uvicorn running on http://127.0.0.1:8000
-```
-
-Backend chạy tại:
+Nếu chạy thành công, Backend hoạt động tại:
 
 ```text
 http://127.0.0.1:8000
 ```
 
-FastAPI Swagger:
+Tài liệu API Swagger:
 
 ```text
 http://127.0.0.1:8000/docs
 ```
 
-Có thể sử dụng Swagger để kiểm thử trực tiếp các API.
+## 10. Cấu hình và chạy Frontend
 
----
+Mở Terminal mới tại thư mục gốc dự án:
 
-# ⚛️ 7. Cài đặt Frontend
-
-Giữ Terminal backend đang chạy.
-
-Mở **Terminal mới**.
-
-Trở về thư mục dự án và truy cập frontend:
-
-```bash
+```powershell
 cd frontend
 ```
 
-Cài các package:
+Cài các package được khai báo trong `package.json`:
 
-```bash
+```powershell
 npm install
 ```
 
----
+Khởi động Vite:
 
-# ▶️ 8. Chạy Frontend
-
-Chạy:
-
-```bash
+```powershell
 npm run dev
 ```
 
-Vite sẽ hiển thị địa chỉ tương tự:
+Frontend mặc định hoạt động tại:
 
 ```text
 http://localhost:5173
 ```
 
-Mở trình duyệt và truy cập:
+Mở địa chỉ này trên trình duyệt để sử dụng DevTask.
+
+## 11. Cấu hình Ollama cho chức năng AI
+
+Các chức năng Project AI sử dụng Ollama để chạy mô hình ngôn ngữ cục bộ.
+
+Cài Ollama từ:
+
+https://ollama.com/
+
+Sau khi cài đặt, mở Terminal và tải mô hình được cấu hình mặc định trong Backend:
+
+```powershell
+ollama pull qwen2.5:7b-instruct-q4_K_M
+```
+
+Kiểm tra mô hình:
+
+```powershell
+ollama list
+```
+
+Ollama mặc định cung cấp API tại:
 
 ```text
-http://localhost:5173
+http://localhost:11434
 ```
 
----
+Nếu Ollama chưa chạy, các chức năng AI cần kết nối đến Ollama sẽ không hoạt động. Các chức năng quản lý tài khoản, dự án và công việc không cần Ollama để vận hành.
 
-# 🔗 9. Kết nối Frontend với Backend
+## 12. Các thư viện sử dụng
 
-Frontend hiện gọi Backend tại:
+### 12.1. Backend – Python
+
+| Thư viện | Chức năng |
+|---|---|
+| fastapi | Xây dựng REST API |
+| uvicorn | Khởi chạy máy chủ ASGI |
+| sqlalchemy | ORM và truy vấn cơ sở dữ liệu |
+| asyncpg | Kết nối PostgreSQL bất đồng bộ |
+| pydantic | Kiểm tra và chuẩn hóa dữ liệu |
+| email-validator | Kiểm tra địa chỉ email |
+| python-dotenv | Đọc cấu hình từ file `.env` |
+| python-jose | Tạo và xác thực JWT |
+| passlib | Quản lý hàm băm mật khẩu |
+| bcrypt | Băm và kiểm tra mật khẩu |
+| httpx | Gửi yêu cầu HTTP đến Ollama |
+
+Các thư viện `asyncio`, `uuid`, `datetime`, `hashlib`, `secrets`, `smtplib`, `ssl`, `email` và `json` thuộc thư viện chuẩn của Python, không cần cài riêng.
+
+### 12.2. Frontend – Node.js
+
+Các dependencies được khai báo trong `frontend/package.json`:
+
+| Package | Chức năng |
+|---|---|
+| react | Xây dựng giao diện người dùng |
+| react-dom | Hiển thị ứng dụng React |
+| react-router-dom | Điều hướng giữa các trang |
+| lucide-react | Bộ biểu tượng giao diện |
+
+Các devDependencies:
+
+| Package | Chức năng |
+|---|---|
+| vite | Công cụ phát triển và build Frontend |
+| @vitejs/plugin-react | Hỗ trợ React trong Vite |
+| @babel/core | Nền tảng biên dịch Babel |
+| @rolldown/plugin-babel | Tích hợp Babel với Rolldown |
+| babel-plugin-react-compiler | Hỗ trợ React Compiler |
+| oxlint | Kiểm tra chất lượng mã nguồn |
+| @types/react | Kiểu dữ liệu TypeScript cho React |
+| @types/react-dom | Kiểu dữ liệu TypeScript cho React DOM |
+
+Không cần cài từng package bằng tay. Chỉ cần chạy `npm install` trong thư mục `frontend`.
+
+## 13. Kiểm thử API
+
+Sau khi Backend khởi động, truy cập:
 
 ```text
-http://127.0.0.1:8000/api
+http://127.0.0.1:8000/docs
 ```
 
-Backend FastAPI cho phép frontend Vite:
+Swagger hỗ trợ kiểm thử các API được khai báo trong Backend.
 
-```text
-http://localhost:5173
-```
+Một số nhóm API chính:
 
-gọi API thông qua cấu hình CORS.
+- Authentication: đăng ký, đăng nhập và xác minh email.
+- Users: quản lý thông tin tài khoản.
+- Projects: quản lý dự án.
+- Tasks: quản lý công việc.
+- Project Groups: quản lý nhóm công việc.
+- Kanban và Subtasks: quản lý tiến độ và công việc con.
+- Project Costs: quản lý ngân sách và chi phí.
+- Project AI: trò chuyện, ngữ cảnh và các đề xuất AI.
 
-Vì vậy khi chạy dự án cần chạy đồng thời:
-
-```text
-Frontend
-http://localhost:5173
-
-        ↓ HTTP Request
-
-Backend FastAPI
-http://127.0.0.1:8000
-
-        ↓
-
-PostgreSQL
-localhost:5432
-```
-
----
-
-# 🔐 10. Cơ chế đăng nhập JWT
-
-Khi người dùng đăng nhập:
-
-```text
-Frontend
-   ↓
-POST /api/auth/login
-   ↓
-FastAPI
-   ↓
-Kiểm tra tài khoản trong PostgreSQL
-   ↓
-Kiểm tra mật khẩu
-   ↓
-Tạo JWT Access Token
-   ↓
-Trả token cho Frontend
-```
-
-Frontend lưu token:
-
-```javascript
-localStorage.setItem('access_token', data.access_token);
-```
-
-Khi gọi API yêu cầu đăng nhập, frontend gửi:
+Các API được bảo vệ yêu cầu gửi JWT trong header:
 
 ```http
 Authorization: Bearer <access_token>
 ```
 
-Backend kiểm tra JWT trước khi cho phép truy cập tài nguyên được bảo vệ.
+## 14. Một số lỗi thường gặp
 
----
-
-# 📡 11. Các API chính
-
-## Authentication
-
-### Đăng ký
-
-```http
-POST /api/auth/register
-```
-
-Ví dụ:
-
-```json
-{
-  "name": "Nguyen Van A",
-  "email": "nguyenvana@gmail.com",
-  "password": "Password123"
-}
-```
-
-### Đăng nhập
-
-```http
-POST /api/auth/login
-```
-
-```json
-{
-  "email": "nguyenvana@gmail.com",
-  "password": "Password123"
-}
-```
-
-Nếu thành công:
-
-```json
-{
-  "access_token": "...",
-  "token_type": "bearer"
-}
-```
-
----
-
-# 👤 12. User API
-
-Lấy thông tin tài khoản hiện tại:
-
-```http
-GET /api/users/me
-```
-
-Cập nhật thông tin:
-
-```http
-PUT /api/users/me
-```
-
-Các API này yêu cầu JWT.
-
----
-
-# ✅ 13. Task API
-
-Tạo công việc:
-
-```http
-POST /api/tasks
-```
-
-Lấy danh sách:
-
-```http
-GET /api/tasks
-```
-
-Lấy một công việc:
-
-```http
-GET /api/tasks/{task_id}
-```
-
-Cập nhật:
-
-```http
-PUT /api/tasks/{task_id}
-```
-
-Xóa:
-
-```http
-DELETE /api/tasks/{task_id}
-```
-
-Ví dụ Task:
-
-```json
-{
-  "title": "Hoàn thiện API đăng nhập",
-  "description": "Kết nối frontend với backend",
-  "status": "in_progress",
-  "priority": "high",
-  "deadline": "2026-10-15T23:59:00",
-  "assignee": "Hoàng Nghĩa Hùng"
-}
-```
-
----
-
-# 🧪 14. Kiểm tra API bằng Swagger
-
-Sau khi Backend chạy, truy cập:
-
-```text
-http://127.0.0.1:8000/docs
-```
-
-Swagger cho phép:
-
-- Test Register.
-- Test Login.
-- Test User API.
-- Test CRUD Task.
-- Xem request/response.
-- Kiểm tra HTTP Status Code.
-- Kiểm tra lỗi validation.
-
-Đối với API yêu cầu JWT:
-
-1. Đăng nhập bằng `/api/auth/login`.
-2. Copy `access_token`.
-3. Chọn **Authorize** trong Swagger.
-4. Nhập token.
-5. Gọi API cần xác thực.
-
----
-
-# ❗ 15. Một số lỗi thường gặp
-
-## Backend báo lỗi kết nối PostgreSQL
+### Lỗi kết nối PostgreSQL
 
 Kiểm tra:
-
-```env
-DATABASE_URL
-```
-
-Đảm bảo:
-
-- PostgreSQL đang chạy.
-- Username đúng.
-- Password đúng.
+- PostgreSQL đã được khởi động.
 - Database đã được tạo.
-- Port mặc định là `5432`.
+- Username và password chính xác.
+- `DATABASE_URL` trong `backend/.env` đúng.
 
----
+### Lỗi ModuleNotFoundError
 
-## Frontend không gọi được Backend
+Kích hoạt lại môi trường ảo và cài thư viện:
 
-Kiểm tra Backend có đang chạy:
+```powershell
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+```
+
+### Lỗi đăng nhập liên quan đến bcrypt
+
+DevTask sử dụng Passlib với bcrypt. Cần giữ đúng phiên bản tương thích:
 
 ```text
-http://127.0.0.1:8000/docs
+passlib==1.7.4
+bcrypt==4.0.1
 ```
 
-Sau đó kiểm tra frontend đang chạy đúng:
+Không tự ý nâng bcrypt lên phiên bản 5.x khi chưa kiểm tra tương thích với Passlib.
 
-```text
-http://localhost:5173
-```
+### Frontend báo Failed to fetch
 
----
+Kiểm tra:
+- Backend có đang chạy tại `http://127.0.0.1:8000` không.
+- Frontend gọi đúng API URL không.
+- CORS có cho phép `http://localhost:5173` không.
+- Request có gửi JWT nếu API yêu cầu xác thực không.
+- Backend có phát sinh lỗi trong Terminal không.
 
-## Lỗi ModuleNotFoundError
+### Không gửi được email OTP
 
-Ví dụ:
+Kiểm tra:
+- `SMTP_EMAIL` chính xác.
+- `SMTP_APP_PASSWORD` là Gmail App Password hợp lệ.
+- SMTP host và port đúng.
+- Kết nối Internet của máy.
 
-```text
-ModuleNotFoundError: No module named 'fastapi'
-```
+### Chức năng AI không phản hồi
 
-Kích hoạt lại môi trường:
+Kiểm tra:
+- Ollama đã được cài đặt và đang chạy.
+- Đã tải mô hình `qwen2.5:7b-instruct-q4_K_M`.
+- Ollama hoạt động tại `http://localhost:11434`.
+
+## 15. Quy trình làm việc nhóm với GitHub
+
+Sau khi clone dự án, mỗi thành viên làm việc trên source code tại máy cá nhân.
+
+Lấy phiên bản mới nhất:
 
 ```bash
-venv\Scripts\activate
+git pull origin main
 ```
 
-Sau đó:
+Kiểm tra thay đổi:
 
 ```bash
-pip install -r requirements.txt
+git status
 ```
 
----
-
-## Port 8000 đang được sử dụng
-
-Có thể chạy backend bằng port khác:
-
-```bash
-uvicorn main:app --reload --port 8001
-```
-
-Nếu đổi port backend, cần cập nhật URL API bên frontend.
-
----
-
-# 🔄 16. Cập nhật source code mới nhất
-
-Trước khi bắt đầu làm việc:
-
-```bash
-git pull
-```
-
-Sau khi hoàn thành chức năng:
+Thêm các thay đổi:
 
 ```bash
 git add .
-git commit -m "Mô tả chức năng đã thực hiện"
-git push
 ```
 
----
-
-# 🌿 17. Quy trình làm việc nhóm
-
-Khuyến nghị mỗi thành viên sử dụng branch riêng:
+Tạo commit:
 
 ```bash
-git checkout -b ten-branch
+git commit -m "Update project features"
 ```
 
-Ví dụ:
+Đẩy thay đổi lên GitHub:
 
 ```bash
-git checkout -b feature-task
+git push origin main
 ```
 
-Sau khi hoàn thành:
+Trước khi push, cần kiểm tra để bảo đảm không đưa các file `.env`, mật khẩu, khóa bí mật, dữ liệu cá nhân hoặc thư mục môi trường ảo lên GitHub.
 
-```bash
-git add .
-git commit -m "Hoàn thiện chức năng Task"
-git push origin feature-task
-```
+## 16. Lưu ý khi triển khai trên nhiều máy
 
-Sau đó tạo Pull Request để merge vào branch `main`.
+Mỗi thành viên cần tự chuẩn bị:
+- Python và môi trường ảo riêng.
+- Node.js và package Frontend.
+- PostgreSQL và database riêng.
+- File `backend/.env` riêng.
+- Ollama và mô hình AI nếu cần sử dụng chức năng AI.
 
----
+Không sử dụng chung mật khẩu PostgreSQL, Gmail App Password, JWT Secret hoặc OTP Pepper giữa các máy.
 
-# 👥 Thành viên nhóm
-
-| Thành viên | Vai trò |
-|---|---|
-| Hoàng Nghĩa Hùng | Nhóm trưởng, thiết kế hệ thống, Backend Python |
-| Chướng Và Kiệt | Frontend React |
-| Lê Đình Hoàng | Database, tài liệu |
-| Phạm Tường Di | Database, tài liệu |
+**Lưu ý về dữ liệu:** PostgreSQL cục bộ của mỗi thành viên là độc lập. GitHub chỉ đồng bộ mã nguồn, không tự động đồng bộ dữ liệu trong database.
 
 ---
 
-# 📈 Trạng thái phát triển
+**DevTask – Hệ thống quản lý công việc và dự án CNTT**
 
-### Đã thực hiện
-
-- [x] Giao diện React
-- [x] Đăng ký tài khoản
-- [x] Đăng nhập
-- [x] Hash mật khẩu
-- [x] JWT Authentication
-- [x] API thông tin người dùng
-- [x] CRUD Task
-- [x] Giao diện Project
-- [x] Giao diện Workspace
-
-### Đang phát triển
-
-- [ ] Kết nối hoàn chỉnh Project với Backend
-- [ ] Kết nối hoàn chỉnh Workspace với Backend
-- [ ] Quản lý thành viên
-- [ ] Phân quyền người dùng
-- [ ] Liên kết Task với Project và User
-- [ ] Hoàn thiện kiểm thử
-- [ ] Dashboard thống kê tiến độ
-
----
-
-# 📌 Thông tin dự án
-
-**Tên dự án:** DevTask - Website Quản lý Công việc & Dự án CNTT
-
-**Mô hình phát triển:** Agile/Scrum
-
-**Frontend:** React + Vite
-
-**Backend:** FastAPI
-
-**Database:** PostgreSQL
-
-**Authentication:** JWT
-
-**Repository:**  
-https://github.com/tigerr14436/project-managenemt
+Repository: https://github.com/tigerr14436/project-managenemt
