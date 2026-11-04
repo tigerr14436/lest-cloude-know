@@ -6,6 +6,7 @@ Chạy server bằng lệnh:
 Lưu ý: create_all() tạo bảng mới, không tự sửa bảng đã tồn tại.
 Không cần xóa dữ liệu cũ để bổ sung bảng project_repositories.
 """
+from project_costs import router as project_costs_router
 from ai.knowledge_router import router as ai_knowledge_router
 from ai.profile_router import router as ai_profile_router
 from ai.models import (
@@ -29,7 +30,7 @@ from project_groups import router as project_groups_router
 from group_kanban import router as group_kanban_router
 from subtask_focus import router as subtask_focus_router
 from name_tags import router as name_tags_router, generate_name_tag
-from database import engine, Base, get_db
+from database import get_db
 from models import (
     Task, TaskCreate, TaskUpdate, TaskOut, ALLOWED_STATUS, ALLOWED_PRIORITY,
     User, UserRegister, UserLogin, UserUpdate, UserOut, TokenOut,
@@ -51,6 +52,7 @@ from models import (
     ProjectRepositoryOut,
 )
 app = FastAPI(title="Quản lý công việc & dự án CNTT API")
+app.include_router(project_costs_router)
 app.include_router(ai_chat_router)
 app.include_router(ai_knowledge_router)
 app.include_router(ai_profile_router)
@@ -67,10 +69,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-@app.on_event("startup")
-async def on_startup():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+
 def generate_join_code(name: str) -> str:
     letters = "".join(ch for ch in name.upper() if ch.isalpha())[:3] or "PRJ"
     digits = "".join(random.choices(string.digits, k=4))
