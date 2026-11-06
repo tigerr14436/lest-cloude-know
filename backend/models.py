@@ -4,7 +4,10 @@ import uuid
 from datetime import datetime, date
 from typing import Optional
 
-from sqlalchemy import Boolean, Integer, String, Text, Date, DateTime, ForeignKey, UniqueConstraint, func
+from sqlalchemy import (
+    Boolean, Integer, Float, String, Text, Date, DateTime,
+    ForeignKey, UniqueConstraint, func
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from pydantic import BaseModel, Field, EmailStr, model_validator
@@ -61,16 +64,60 @@ class ProjectMember(Base):
 class Task(Base):
     __tablename__ = "tasks"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False)
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4
+    )
+
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id"),
+        nullable=False
+    )
+
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     status: Mapped[str] = mapped_column(String(50), default="todo")
     priority: Mapped[str] = mapped_column(String(50), default="medium")
-    deadline: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    assignee: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    deadline: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+    assignee: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True
+    )
+
+    # Thời gian dự kiến (đơn vị: ngày, tối đa 7 ngày)
+    estimated_best_days: Mapped[Optional[float]] = mapped_column(
+        Float,
+        nullable=True
+    )
+
+    estimated_average_days: Mapped[Optional[float]] = mapped_column(
+        Float,
+        nullable=True
+    )
+
+    estimated_worst_days: Mapped[Optional[float]] = mapped_column(
+        Float,
+        nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now()
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now()
+    )
 
 
 class ProjectRepository(Base):
@@ -174,12 +221,70 @@ ALLOWED_PRIORITY = {"low", "medium", "high"}
 
 class TaskBase(BaseModel):
     project_id: uuid.UUID
-    title: str = Field(..., min_length=1, description="Tên công việc")
-    description: Optional[str] = Field(None, description="Mô tả chi tiết")
+
+    title: str = Field(
+        ...,
+        min_length=1,
+        description="Tên công việc"
+    )
+
+    description: Optional[str] = Field(
+        None,
+        description="Mô tả chi tiết"
+    )
+
     status: str = Field(default="todo")
     priority: str = Field(default="medium")
     deadline: Optional[datetime] = Field(None)
     assignee: Optional[str] = Field(None)
+
+    # Thời gian dự kiến theo ngày
+    estimated_best_days: Optional[float] = Field(
+        None,
+        gt=0,
+        le=7,
+        description="Thời gian tốt nhất (ngày)"
+    )
+
+    estimated_average_days: Optional[float] = Field(
+        None,
+        gt=0,
+        le=7,
+        description="Thời gian trung bình (ngày)"
+    )
+
+    estimated_worst_days: Optional[float] = Field(
+        None,
+        gt=0,
+        le=7,
+        description="Thời gian tệ nhất (ngày)"
+    )
+
+    @model_validator(mode="after")
+    def validate_estimated_time(self):
+        best = self.estimated_best_days
+        average = self.estimated_average_days
+        worst = self.estimated_worst_days
+
+        if best is not None and average is not None:
+            if best > average:
+                raise ValueError(
+                    "Thời gian tốt nhất không được lớn hơn thời gian trung bình"
+                )
+
+        if average is not None and worst is not None:
+            if average > worst:
+                raise ValueError(
+                    "Thời gian trung bình không được lớn hơn thời gian tệ nhất"
+                )
+
+        if best is not None and worst is not None:
+            if best > worst:
+                raise ValueError(
+                    "Thời gian tốt nhất không được lớn hơn thời gian tệ nhất"
+                )
+
+        return self
 
 
 class TaskCreate(TaskBase):
@@ -194,6 +299,47 @@ class TaskUpdate(BaseModel):
     deadline: Optional[datetime] = None
     assignee: Optional[str] = None
 
+    estimated_best_days: Optional[float] = Field(
+        None,
+        gt=0,
+        le=7
+    )
+
+    estimated_average_days: Optional[float] = Field(
+        None,
+        gt=0,
+        le=7
+    )
+
+    estimated_worst_days: Optional[float] = Field(
+        None,
+        gt=0,
+        le=7
+    )
+
+    @model_validator(mode="after")
+    def validate_estimated_time(self):
+        best = self.estimated_best_days
+        average = self.estimated_average_days
+        worst = self.estimated_worst_days
+
+        if best is not None and average is not None and best > average:
+            raise ValueError(
+                "Thời gian tốt nhất không được lớn hơn thời gian trung bình"
+            )
+
+        if average is not None and worst is not None and average > worst:
+            raise ValueError(
+                "Thời gian trung bình không được lớn hơn thời gian tệ nhất"
+            )
+
+        if best is not None and worst is not None and best > worst:
+            raise ValueError(
+                "Thời gian tốt nhất không được lớn hơn thời gian tệ nhất"
+            )
+
+        return self
+
 
 class TaskOut(BaseModel):
     id: uuid.UUID
@@ -204,6 +350,11 @@ class TaskOut(BaseModel):
     priority: str
     deadline: Optional[datetime]
     assignee: Optional[str]
+
+    estimated_best_days: Optional[float] = None
+    estimated_average_days: Optional[float] = None
+    estimated_worst_days: Optional[float] = None
+
     created_at: datetime
     updated_at: datetime
 
