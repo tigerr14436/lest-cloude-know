@@ -467,3 +467,24 @@ body {
   color: #64748b;
   font-size: 13px;
 }
+
+.notification-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.notification-close-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 4px;
+  color: #64748b;
+}
+
+.notification-close-btn:hover {
+  color: #ef4444;
+}

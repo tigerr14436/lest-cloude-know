@@ -32,6 +32,11 @@ from project_groups import (
 )
 from auth_deps import get_current_user
 
+# Notification là model và hàm được khai báo trong notifications.py.
+# Nếu file notifications.py chưa được tạo hoặc chưa có hàm create_notification,
+# cần hoàn thiện file đó trước khi chạy backend.
+from notifications import create_notification
+
 
 router = APIRouter(
     prefix="/api/projects/{project_id}/groups/{group_id}/kanban",
@@ -120,7 +125,6 @@ class Subtask(Base):
         nullable=True,
     )
 
-    # Thời gian dự kiến của Subtask (đơn vị: giờ)
     estimated_best_hours: Mapped[Optional[float]] = mapped_column(
         Float,
         nullable=True,
@@ -168,7 +172,6 @@ class SubtaskCreate(BaseModel):
     priority: str = "medium"
     assignee_id: Optional[uuid.UUID] = None
 
-    # Thời gian dự kiến theo giờ
     estimated_best_hours: Optional[float] = Field(
         default=None,
         gt=0,
@@ -186,31 +189,11 @@ class SubtaskCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_estimated_hours(self):
-        best = self.estimated_best_hours
-        average = self.estimated_average_hours
-        worst = self.estimated_worst_hours
-
-        if best is not None and average is not None:
-            if best > average:
-                raise ValueError(
-                    "Thời gian tốt nhất không được lớn hơn "
-                    "thời gian trung bình"
-                )
-
-        if average is not None and worst is not None:
-            if average > worst:
-                raise ValueError(
-                    "Thời gian trung bình không được lớn hơn "
-                    "thời gian tệ nhất"
-                )
-
-        if best is not None and worst is not None:
-            if best > worst:
-                raise ValueError(
-                    "Thời gian tốt nhất không được lớn hơn "
-                    "thời gian tệ nhất"
-                )
-
+        validate_estimated_hours(
+            self.estimated_best_hours,
+            self.estimated_average_hours,
+            self.estimated_worst_hours,
+        )
         return self
 
 
@@ -243,31 +226,11 @@ class SubtaskUpdate(BaseModel):
 
     @model_validator(mode="after")
     def validate_estimated_hours(self):
-        best = self.estimated_best_hours
-        average = self.estimated_average_hours
-        worst = self.estimated_worst_hours
-
-        if best is not None and average is not None:
-            if best > average:
-                raise ValueError(
-                    "Thời gian tốt nhất không được lớn hơn "
-                    "thời gian trung bình"
-                )
-
-        if average is not None and worst is not None:
-            if average > worst:
-                raise ValueError(
-                    "Thời gian trung bình không được lớn hơn "
-                    "thời gian tệ nhất"
-                )
-
-        if best is not None and worst is not None:
-            if best > worst:
-                raise ValueError(
-                    "Thời gian tốt nhất không được lớn hơn "
-                    "thời gian tệ nhất"
-                )
-
+        validate_estimated_hours(
+            self.estimated_best_hours,
+            self.estimated_average_hours,
+            self.estimated_worst_hours,
+        )
         return self
 
 
@@ -367,11 +330,6 @@ async def assigned_task(db, project_id, group_id, task_id):
 # =========================================================
 
 def validate_estimated_hours(best, average, worst):
-    """
-    Kiểm tra thứ tự thời gian dự kiến của Subtask.
-    Các giá trị None được phép.
-    """
-
     if best is not None and average is not None:
         if best > average:
             raise HTTPException(
@@ -481,7 +439,6 @@ async def board(
                 "status": t.status,
                 "priority": t.priority,
                 "description": t.description,
-
                 "estimated_best_days": t.estimated_best_days,
                 "estimated_average_days": t.estimated_average_days,
                 "estimated_worst_days": t.estimated_worst_days,
@@ -638,7 +595,7 @@ async def create_subtask(
 
     manager(owner, leader)
 
-    await assigned_task(
+    task = await assigned_task(
         db,
         project_id,
         group_id,
@@ -672,13 +629,39 @@ async def create_subtask(
         description=payload.description,
         priority=payload.priority,
         assignee_id=payload.assignee_id,
-
         estimated_best_hours=payload.estimated_best_hours,
         estimated_average_hours=payload.estimated_average_hours,
         estimated_worst_hours=payload.estimated_worst_hours,
     )
 
     db.add(s)
+    await db.flush()
+
+    # Tạo thông báo nếu Subtask được giao cho người khác.
+    if (
+        s.assignee_id is not None
+        and s.assignee_id != current_user.id
+    ):
+        await create_notification(
+            db=db,
+            recipient_id=s.assignee_id,
+            notification_type="subtask_assigned",
+            title="Bạn được giao Subtask mới",
+            message=(
+                f"Bạn được giao Subtask '{s.title}' "
+                f"thuộc Task '{task.title}'."
+            ),
+            data={
+                "project_id": str(project_id),
+                "group_id": str(group_id),
+                "task_id": str(task.id),
+                "subtask_id": str(s.id),
+                "subtask_title": s.title,
+                "task_title": task.title,
+                "assigned_by_id": str(current_user.id),
+                "assigned_by_name": current_user.name,
+            },
+        )
 
     await db.commit()
     await db.refresh(s)
@@ -739,6 +722,8 @@ async def update_subtask(
             detail="Độ ưu tiên không hợp lệ",
         )
 
+    old_assignee_id = s.assignee_id
+
     if "assignee_id" in data:
         await validate_assignee(
             db,
@@ -778,8 +763,41 @@ async def update_subtask(
                 detail="Tên Subtask không được trống",
             )
 
+    # Cập nhật dữ liệu Subtask.
     for key, value in data.items():
         setattr(s, key, value)
+
+    # Chỉ gửi thông báo khi có người mới được giao.
+    new_assignee_id = s.assignee_id
+
+    if (
+        "assignee_id" in data
+        and new_assignee_id is not None
+        and new_assignee_id != old_assignee_id
+        and new_assignee_id != current_user.id
+    ):
+        task = await db.get(Task, s.task_id)
+
+        await create_notification(
+            db=db,
+            recipient_id=new_assignee_id,
+            notification_type="subtask_assigned",
+            title="Bạn được giao Subtask mới",
+            message=(
+                f"Bạn được giao Subtask '{s.title}' "
+                f"thuộc Task '{task.title if task else 'Không xác định'}'."
+            ),
+            data={
+                "project_id": str(project_id),
+                "group_id": str(group_id),
+                "task_id": str(s.task_id),
+                "subtask_id": str(s.id),
+                "subtask_title": s.title,
+                "task_title": task.title if task else None,
+                "assigned_by_id": str(current_user.id),
+                "assigned_by_name": current_user.name,
+            },
+        )
 
     await db.commit()
     await db.refresh(s)

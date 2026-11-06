@@ -8,6 +8,9 @@ import {
   Layers,
   Eye,
   Clock,
+  Pencil,
+  X,
+  Save,
 } from 'lucide-react';
 import SubtaskDetail from './SubtaskDetail';
 
@@ -91,7 +94,7 @@ const INITIAL_FORM = {
   estimated_worst_hours: '',
 };
 
-// Chuyển ô nhập trống thành null để Backend lưu đúng giá trị.
+// Chuyển ô nhập trống thành null.
 const parseEstimate = (value) => {
   if (value === '' || value === null || value === undefined) {
     return null;
@@ -135,8 +138,11 @@ export default function GroupKanbanBoard({
   const [error, setError] = useState('');
 
   const [taskToAssign, setTaskToAssign] = useState('');
-
   const [form, setForm] = useState(INITIAL_FORM);
+
+  // ID của Subtask đang chỉnh sửa.
+  // null nghĩa là đang ở chế độ tạo mới.
+  const [editingSubtaskId, setEditingSubtaskId] = useState(null);
 
   const canManage =
     isProjectOwner ||
@@ -249,6 +255,7 @@ export default function GroupKanbanBoard({
     return true;
   };
 
+  // Owner giao Task cho nhóm.
   const assign = () => {
     if (!taskToAssign) return;
 
@@ -272,15 +279,50 @@ export default function GroupKanbanBoard({
     );
   };
 
-  // Tạo Subtask mới.
-  const create = (e) => {
+  // Bắt đầu chỉnh sửa Subtask.
+  const startEdit = (subtask) => {
+    if (!canManage || busy) return;
+
+    setEditingSubtaskId(subtask.id);
+
+    setForm({
+      task_id: subtask.task_id || '',
+      title: subtask.title || '',
+      description: subtask.description || '',
+      priority: subtask.priority || 'medium',
+      assignee_id: subtask.assignee_id || '',
+
+      estimated_best_hours:
+        subtask.estimated_best_hours ?? '',
+
+      estimated_average_hours:
+        subtask.estimated_average_hours ?? '',
+
+      estimated_worst_hours:
+        subtask.estimated_worst_hours ?? '',
+    });
+
+    window.scrollTo({
+      top: 0,
+      behavior: 'smooth',
+    });
+  };
+
+  // Hủy chỉnh sửa.
+  const cancelEdit = () => {
+    setEditingSubtaskId(null);
+    setForm(INITIAL_FORM);
+  };
+
+  // Tạo mới hoặc cập nhật Subtask.
+  const submitForm = (e) => {
     e.preventDefault();
 
     if (!canManage) {
       showNotification?.(
         'loi',
         'Không có quyền',
-        'Chỉ Owner hoặc Leader mới được tạo Subtask.',
+        'Chỉ Owner hoặc Leader mới được tạo hoặc sửa Subtask.',
       );
       return;
     }
@@ -296,10 +338,11 @@ export default function GroupKanbanBoard({
 
     if (!validateEstimates()) return;
 
+    const isEditing = Boolean(editingSubtaskId);
+
     execute(
       async () => {
         const payload = {
-          task_id: form.task_id,
           title: form.title.trim(),
           description: form.description.trim() || null,
           priority: form.priority,
@@ -318,22 +361,43 @@ export default function GroupKanbanBoard({
           ),
         };
 
-        await request(
-          projectId,
-          group.id,
-          '/subtasks',
-          {
-            method: 'POST',
-            body: JSON.stringify(payload),
-          },
-        );
+        if (isEditing) {
+          // Cập nhật Subtask hiện tại.
+          await request(
+            projectId,
+            group.id,
+            `/subtasks/${editingSubtaskId}`,
+            {
+              method: 'PATCH',
+              body: JSON.stringify(payload),
+            },
+          );
+        } else {
+          // Tạo Subtask mới.
+          await request(
+            projectId,
+            group.id,
+            '/subtasks',
+            {
+              method: 'POST',
+              body: JSON.stringify({
+                ...payload,
+                task_id: form.task_id,
+              }),
+            },
+          );
+        }
 
+        setEditingSubtaskId(null);
         setForm(INITIAL_FORM);
       },
-      'Đã tạo Subtask',
+      isEditing
+        ? 'Đã cập nhật Subtask'
+        : 'Đã tạo Subtask',
     );
   };
 
+  // Cập nhật trạng thái Subtask.
   const changeStatus = (subtask, status) =>
     execute(
       () =>
@@ -349,8 +413,9 @@ export default function GroupKanbanBoard({
       'Đã cập nhật trạng thái',
     );
 
+  // Xóa Subtask.
   const remove = (subtask) => {
-    if (!canManage) return;
+    if (!canManage || busy) return;
 
     if (!window.confirm(`Xóa Subtask "${subtask.title}"?`)) {
       return;
@@ -370,8 +435,9 @@ export default function GroupKanbanBoard({
     );
   };
 
+  // Gỡ Task khỏi nhóm.
   const unassign = (task) => {
-    if (!isProjectOwner) return;
+    if (!isProjectOwner || busy) return;
 
     if (!window.confirm(`Gỡ Task "${task.title}" khỏi nhóm?`)) {
       return;
@@ -605,22 +671,47 @@ export default function GroupKanbanBoard({
         )}
       </div>
 
-      {/* FORM TẠO SUBTASK */}
+      {/* FORM TẠO / CHỈNH SỬA SUBTASK */}
       {canManage && data.tasks.length > 0 && (
-        <form onSubmit={create} style={panel}>
+        <form onSubmit={submitForm} style={panel}>
           <div
             style={{
               fontWeight: 700,
               marginBottom: 12,
               fontSize: 16,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 7,
             }}
           >
-            <Plus
-              size={17}
-              style={{ verticalAlign: 'middle' }}
-            />{' '}
-            Tạo Subtask mới
+            {editingSubtaskId ? (
+              <>
+                <Pencil size={17} color="#fbbf24" />
+                Chỉnh sửa Subtask
+              </>
+            ) : (
+              <>
+                <Plus size={17} />
+                Tạo Subtask mới
+              </>
+            )}
           </div>
+
+          {editingSubtaskId && (
+            <div
+              style={{
+                padding: 10,
+                marginBottom: 12,
+                borderRadius: 8,
+                background: '#422006',
+                color: '#fde68a',
+                fontSize: 13,
+              }}
+            >
+              Bạn đang chỉnh sửa Subtask. Hãy kiểm tra thông tin
+              trước khi lưu thay đổi.
+            </div>
+          )}
 
           <div
             style={{
@@ -633,8 +724,13 @@ export default function GroupKanbanBoard({
             <select
               required
               aria-label="Task cha"
-              style={field}
+              style={{
+                ...field,
+                opacity: editingSubtaskId ? 0.6 : 1,
+                cursor: editingSubtaskId ? 'not-allowed' : 'pointer',
+              }}
               value={form.task_id}
+              disabled={Boolean(editingSubtaskId)}
               onChange={(e) =>
                 setForm((prev) => ({
                   ...prev,
@@ -862,21 +958,60 @@ export default function GroupKanbanBoard({
             và theo thứ tự: Tốt nhất ≤ Trung bình ≤ Tệ nhất.
           </div>
 
-          <button
-            disabled={busy}
+          {/* NÚT LƯU / TẠO / HỦY */}
+          <div
             style={{
-              ...btn,
+              display: 'flex',
+              gap: 8,
+              flexWrap: 'wrap',
               marginTop: 14,
-              opacity: busy ? 0.6 : 1,
             }}
-            type="submit"
           >
-            <Plus
-              size={15}
-              style={{ verticalAlign: 'middle' }}
-            />{' '}
-            {busy ? 'Đang xử lý...' : 'Tạo Subtask'}
-          </button>
+            <button
+              disabled={busy}
+              style={{
+                ...btn,
+                background: editingSubtaskId ? '#d97706' : '#0284c7',
+                opacity: busy ? 0.6 : 1,
+              }}
+              type="submit"
+            >
+              {editingSubtaskId ? (
+                <Save
+                  size={15}
+                  style={{ verticalAlign: 'middle' }}
+                />
+              ) : (
+                <Plus
+                  size={15}
+                  style={{ verticalAlign: 'middle' }}
+                />
+              )}{' '}
+              {busy
+                ? 'Đang xử lý...'
+                : editingSubtaskId
+                  ? 'Lưu thay đổi'
+                  : 'Tạo Subtask'}
+            </button>
+
+            {editingSubtaskId && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={cancelEdit}
+                style={{
+                  ...btn,
+                  background: '#475569',
+                }}
+              >
+                <X
+                  size={15}
+                  style={{ verticalAlign: 'middle' }}
+                />{' '}
+                Hủy sửa
+              </button>
+            )}
+          </div>
         </form>
       )}
 
@@ -1085,6 +1220,7 @@ export default function GroupKanbanBoard({
                         </div>
                       </div>
 
+                      {/* ĐỔI TRẠNG THÁI */}
                       {allowed && (
                         <select
                           aria-label={`Đổi trạng thái ${subtask.title}`}
@@ -1101,40 +1237,63 @@ export default function GroupKanbanBoard({
                             )
                           }
                         >
-                          {COLUMNS.map(
-                            ([value, name]) => (
-                              <option
-                                key={value}
-                                value={value}
-                              >
-                                {name}
-                              </option>
-                            ),
-                          )}
+                          {COLUMNS.map(([value, name]) => (
+                            <option key={value} value={value}>
+                              {name}
+                            </option>
+                          ))}
                         </select>
                       )}
 
+                      {/* NÚT SỬA VÀ XÓA */}
                       {canManage && (
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={() => remove(subtask)}
+                        <div
                           style={{
-                            marginTop: 8,
-                            background: 'transparent',
-                            border: 0,
-                            color: '#f87171',
-                            cursor: 'pointer',
+                            display: 'flex',
+                            gap: 8,
+                            marginTop: 10,
+                            borderTop: '1px solid #334155',
+                            paddingTop: 9,
                           }}
                         >
-                          <Trash2
-                            size={13}
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => startEdit(subtask)}
                             style={{
-                              verticalAlign: 'middle',
+                              ...btn,
+                              flex: 1,
+                              background: '#854d0e',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: 6,
+                              padding: '8px 10px',
                             }}
-                          />{' '}
-                          Xóa
-                        </button>
+                          >
+                            <Pencil size={14} />
+                            Sửa
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => remove(subtask)}
+                            style={{
+                              ...btn,
+                              flex: 1,
+                              background: '#7f1d1d',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: 6,
+                              padding: '8px 10px',
+                            }}
+                          >
+                            <Trash2 size={14} />
+                            Xóa
+                          </button>
+                        </div>
                       )}
                     </article>
                   );

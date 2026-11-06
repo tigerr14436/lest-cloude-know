@@ -1,4 +1,3 @@
-
 """
 File chính chạy FastAPI server.
 Đặt file này trong thư mục /backend.
@@ -17,6 +16,9 @@ import asyncio
 import json
 import re
 
+from contextlib import asynccontextmanager
+from database import Base, engine, get_db
+
 from datetime import datetime, timezone
 from urllib.parse import urlparse, quote
 from urllib.request import Request, urlopen
@@ -29,7 +31,6 @@ from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database import get_db
 
 from models import (
     Task,
@@ -78,6 +79,17 @@ from project_groups import router as project_groups_router
 from group_kanban import router as group_kanban_router
 from subtask_focus import router as subtask_focus_router
 
+# ============================================================
+# NOTIFICATIONS
+# ============================================================
+
+from notifications import (
+    router as notifications_router,
+    Notification,
+    GroupInvitation,
+    create_notification,
+)
+
 from name_tags import (
     router as name_tags_router,
     generate_name_tag,
@@ -102,8 +114,23 @@ from ai.router import router as ai_router
 # FASTAPI APPLICATION
 # ============================================================
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Khởi tạo database khi FastAPI khởi động.
+
+    create_all chỉ tạo bảng chưa tồn tại,
+    không xóa hoặc sửa cấu trúc bảng cũ.
+    """
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    yield
+
+
 app = FastAPI(
-    title="Quản lý công việc & dự án CNTT API"
+    title="Quản lý công việc & dự án CNTT API",
+    lifespan=lifespan,
 )
 
 
@@ -123,6 +150,9 @@ app.include_router(email_verification_router)
 app.include_router(project_groups_router)
 app.include_router(group_kanban_router)
 app.include_router(subtask_focus_router)
+
+# Router thông báo cá nhân và lời mời nhóm.
+app.include_router(notifications_router)
 
 app.include_router(name_tags_router)
 
@@ -255,6 +285,49 @@ async def _require_project_owner(
 
 
 # ============================================================
+# TASK ASSIGNEE VALIDATION
+# ============================================================
+
+async def _validate_task_assignee(
+    db: AsyncSession,
+    project_id: uuid.UUID,
+    assignee_id: uuid.UUID,
+) -> User:
+    """
+    Kiểm tra người được giao Task:
+
+    1. Tài khoản phải tồn tại.
+    2. Tài khoản phải là thành viên của dự án.
+    3. Trả về User để đồng bộ tên người được giao.
+    """
+
+    user = await db.get(
+        User,
+        assignee_id,
+    )
+
+    if user is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Không tìm thấy tài khoản được giao Task",
+        )
+
+    membership = await _get_membership(
+        db,
+        project_id,
+        assignee_id,
+    )
+
+    if membership is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Người được giao Task phải là thành viên của dự án",
+        )
+
+    return user
+
+
+# ============================================================
 # TASK ESTIMATED TIME VALIDATION
 # ============================================================
 
@@ -353,9 +426,6 @@ async def register(
             status_code=400,
             detail="Email này đã được đăng ký",
         )
-
-    # Cấp Name Tag duy nhất.
-    # Savepoint cho phép thử lại khi bị trùng Name Tag.
 
     new_user = None
 
@@ -509,8 +579,6 @@ async def create_project(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-
-    # Sinh join_code duy nhất.
 
     while True:
 
@@ -881,15 +949,11 @@ async def delete_or_leave_project(
 
     if member.role == "owner":
 
-        # Xóa repository trước khi xóa project.
-
         await db.execute(
             ProjectRepository.__table__.delete().where(
                 ProjectRepository.project_id == project_id
             )
         )
-
-        # Xóa Task và thành viên thuộc dự án.
 
         await db.execute(
             Task.__table__.delete().where(
@@ -912,8 +976,6 @@ async def delete_or_leave_project(
             await db.delete(project)
 
     else:
-
-        # Member thường chỉ rời khỏi dự án.
 
         await db.delete(member)
 
@@ -938,7 +1000,6 @@ async def create_task(
 ):
 
     # Chỉ Owner được tạo Task.
-
     await _require_project_owner(
         db,
         task.project_id,
@@ -957,20 +1018,77 @@ async def create_task(
             detail=f"priority phải là một trong: {', '.join(ALLOWED_PRIORITY)}",
         )
 
-    # Kiểm tra ba giá trị thời gian dự kiến.
-
     _validate_task_estimates(
         task.estimated_best_days,
         task.estimated_average_days,
         task.estimated_worst_days,
     )
 
+    # Lấy dữ liệu Task từ Pydantic.
+    task_data = task.model_dump()
+
+    # Kiểm tra người được giao Task.
+    assignee_user = None
+
+    assignee_id = task_data.get("assignee_id")
+
+    if assignee_id is not None:
+
+        assignee_user = await _validate_task_assignee(
+            db,
+            task.project_id,
+            assignee_id,
+        )
+
+        # Đồng bộ tên người được giao với tài khoản.
+        task_data["assignee"] = assignee_user.name
+
     new_task = Task(
-        **task.model_dump()
+        **task_data
     )
 
     db.add(new_task)
 
+    # Flush để lấy ID Task trước khi tạo thông báo.
+    await db.flush()
+
+    # Tạo thông báo cho người được giao.
+    # Không gửi thông báo cho chính người tạo Task.
+    if (
+        assignee_user is not None
+        and assignee_user.id != current_user.id
+    ):
+
+        project = await db.get(
+            Project,
+            task.project_id,
+        )
+
+        await create_notification(
+            db=db,
+            recipient_id=assignee_user.id,
+            notification_type="task_assigned",
+            title="Bạn được giao một Task mới",
+            message=(
+                f'{current_user.name} đã giao cho bạn Task '
+                f'"{new_task.title}"'
+            ),
+            data={
+                "project_id": str(task.project_id),
+                "task_id": str(new_task.id),
+                "assignee_id": str(assignee_user.id),
+                "assigned_by_id": str(current_user.id),
+                "assigned_by_name": current_user.name,
+                "project_name": (
+                    project.name
+                    if project
+                    else None
+                ),
+                "task_title": new_task.title,
+            },
+        )
+
+    # Task và Notification được lưu cùng transaction.
     await db.commit()
     await db.refresh(new_task)
 
@@ -1075,7 +1193,6 @@ async def update_task(
     )
 
     # Chỉ Owner được cập nhật thông tin Task.
-
     await _require_project_owner(
         db,
         existing.project_id,
@@ -1104,9 +1221,7 @@ async def update_task(
             detail=f"priority phải là một trong: {', '.join(ALLOWED_PRIORITY)}",
         )
 
-    # Kết hợp giá trị mới với giá trị hiện có trong database.
-    # Cần thiết khi người dùng chỉ cập nhật một hoặc hai trường.
-
+    # Kết hợp giá trị mới với giá trị hiện có.
     best_days = update_data.get(
         "estimated_best_days",
         existing.estimated_best_days,
@@ -1128,9 +1243,84 @@ async def update_task(
         worst_days,
     )
 
+    # Lưu người được giao cũ để xác định có thay đổi hay không.
+    old_assignee_id = existing.assignee_id
+
+    new_assignee_user = None
+
+    # Trường hợp frontend gửi assignee_id.
+    if "assignee_id" in update_data:
+
+        new_assignee_id = update_data["assignee_id"]
+
+        if new_assignee_id is None:
+
+            # Người dùng chủ động bỏ giao Task.
+            update_data["assignee"] = None
+
+        else:
+
+            new_assignee_user = await _validate_task_assignee(
+                db,
+                existing.project_id,
+                new_assignee_id,
+            )
+
+            # Đồng bộ tên và ID.
+            update_data["assignee"] = new_assignee_user.name
+
+    # Tương thích frontend cũ chỉ gửi tên assignee.
+    # Khi tên thay đổi mà không có assignee_id,
+    # không giữ lại ID cũ để tránh sai người nhận.
+    elif "assignee" in update_data:
+
+        if update_data["assignee"] != existing.assignee:
+            update_data["assignee_id"] = None
+
+    # Cập nhật Task.
     for field, value in update_data.items():
         setattr(existing, field, value)
 
+    # Chỉ gửi thông báo nếu:
+    # - Có người được giao mới.
+    # - Người mới khác người cũ.
+    # - Người mới không phải người đang thao tác.
+    if (
+        new_assignee_user is not None
+        and new_assignee_user.id != old_assignee_id
+        and new_assignee_user.id != current_user.id
+    ):
+
+        project = await db.get(
+            Project,
+            existing.project_id,
+        )
+
+        await create_notification(
+            db=db,
+            recipient_id=new_assignee_user.id,
+            notification_type="task_assigned",
+            title="Bạn được giao một Task",
+            message=(
+                f'{current_user.name} đã giao cho bạn Task '
+                f'"{existing.title}"'
+            ),
+            data={
+                "project_id": str(existing.project_id),
+                "task_id": str(existing.id),
+                "assignee_id": str(new_assignee_user.id),
+                "assigned_by_id": str(current_user.id),
+                "assigned_by_name": current_user.name,
+                "project_name": (
+                    project.name
+                    if project
+                    else None
+                ),
+                "task_title": existing.title,
+            },
+        )
+
+    # Task và Notification được lưu cùng transaction.
     await db.commit()
     await db.refresh(existing)
 
@@ -1190,8 +1380,6 @@ async def get_dashboard(
     db: AsyncSession = Depends(get_db),
 ):
 
-    # Chỉ lấy dự án mà user đang tham gia.
-
     result = await db.execute(
         select(Project)
         .join(
@@ -1224,8 +1412,6 @@ async def get_dashboard(
             "recentActivities": [],
         }
 
-    # Lấy Task thuộc các dự án có quyền truy cập.
-
     task_result = await db.execute(
         select(Task)
         .where(
@@ -1243,8 +1429,6 @@ async def get_dashboard(
         if task.status == "done"
     )
 
-    # Đếm thành viên duy nhất.
-
     member_result = await db.execute(
         select(
             func.count(
@@ -1257,8 +1441,6 @@ async def get_dashboard(
     )
 
     total_members = member_result.scalar_one()
-
-    # Tính tiến độ cho từng dự án.
 
     project_progress = []
 
@@ -1294,8 +1476,6 @@ async def get_dashboard(
             "totalTasks": total,
             "completedTasks": done,
         })
-
-    # Hoạt động gần đây từ Task và Project.
 
     activities = []
 
@@ -1397,7 +1577,6 @@ def parse_github_repository_url(
 
     owner, repo = parts
 
-    # Loại bỏ phần .git nếu có.
     repo = re.sub(
         r"\.git$",
         "",
