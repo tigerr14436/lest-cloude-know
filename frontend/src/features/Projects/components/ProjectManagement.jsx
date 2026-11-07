@@ -39,7 +39,10 @@ import ProjectCostCalculator from "./ProjectCostCalculator";
 
 async function sendAuthenticatedRequest(apiPath, options = {}) {
   const token = localStorage.getItem("access_token");
-  if (!token) throw new Error("Người dùng chưa đăng nhập");
+
+  if (!token) {
+    throw new Error("Người dùng chưa đăng nhập");
+  }
 
   const headers = {
     "Content-Type": "application/json",
@@ -162,6 +165,65 @@ function getTaskEstimatePayload(form) {
   };
 }
 
+// Định dạng ngày hiển thị
+function formatProjectDate(value) {
+  if (!value) return "Chưa cập nhật";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "Chưa cập nhật";
+  }
+
+  return date.toLocaleDateString("vi-VN");
+}
+
+// Nhãn trạng thái Task
+function getTaskStatusLabel(status) {
+  const labels = {
+    todo: "Cần làm",
+    in_progress: "Đang thực hiện",
+    review: "Đang kiểm tra",
+    done: "Hoàn thành",
+  };
+
+  return labels[status] || status || "Chưa xác định";
+}
+
+// Màu trạng thái Task
+function getTaskStatusColor(status) {
+  const colors = {
+    todo: "#94a3b8",
+    in_progress: "#f59e0b",
+    review: "#38bdf8",
+    done: "#34d399",
+  };
+
+  return colors[status] || "#94a3b8";
+}
+
+// Nhãn mức độ ưu tiên
+function getTaskPriorityLabel(priority) {
+  const labels = {
+    low: "Thấp",
+    medium: "Trung bình",
+    high: "Cao",
+  };
+
+  return labels[priority] || "Chưa xác định";
+}
+
+// Màu mức độ ưu tiên
+function getTaskPriorityColor(priority) {
+  const colors = {
+    low: "#34d399",
+    medium: "#fbbf24",
+    high: "#f87171",
+  };
+
+  return colors[priority] || "#94a3b8";
+}
+
 export default function ProjectManagement() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -172,21 +234,30 @@ export default function ProjectManagement() {
   const currentUserEmail = currentUser?.email || "";
 
   const [projectList, setProjectList] = useState([]);
-  const [isLoadingProjects, setIsLoadingProjects] = useState(true);
+  const [isLoadingProjects, setIsLoadingProjects] =
+    useState(true);
 
-  const [selectedProject, setSelectedProject] = useState(null);
+  const [selectedProject, setSelectedProject] =
+    useState(null);
+
   const [projectTasks, setProjectTasks] = useState([]);
   const [projectMembers, setProjectMembers] = useState([]);
 
-  const [isLoadingMembers, setIsLoadingMembers] = useState(false);
-  const [isLoadingTasks, setIsLoadingTasks] = useState(false);
+  const [isLoadingMembers, setIsLoadingMembers] =
+    useState(false);
 
-  const [activeTab, setActiveTab] = useState("kanban");
+  const [isLoadingTasks, setIsLoadingTasks] =
+    useState(false);
+
+  // Tab mặc định là Tổng quan dự án
+  const [activeTab, setActiveTab] = useState("overview");
 
   useEffect(() => {
     const returnProjectId = location.state?.returnProjectId;
 
-    if (!returnProjectId || projectList.length === 0) return;
+    if (!returnProjectId || projectList.length === 0) {
+      return;
+    }
 
     const project = projectList.find(
       (item) =>
@@ -195,7 +266,10 @@ export default function ProjectManagement() {
 
     if (project) {
       setSelectedProject(project);
-      setActiveTab(location.state?.returnTab || "kanban");
+
+      setActiveTab(
+        location.state?.returnTab || "overview",
+      );
 
       navigate("/project", {
         replace: true,
@@ -211,11 +285,53 @@ export default function ProjectManagement() {
     selectedProject?.role === "owner";
 
   const isAnyGroupLeader = groups.some(
-    (g) => g.leader_id === currentUser?.id,
+    (group) => group.leader_id === currentUser?.id,
   );
 
   // Chỉ Owner được sửa Task cấp dự án
   const canManageKanban = isProjectOwner;
+
+  // =====================================================
+  // THỐNG KÊ TỔNG QUAN DỰ ÁN
+  // Chỉ thống kê Task cấp dự án, không cộng Subtask.
+  // =====================================================
+
+  const totalTasks = projectTasks.length;
+
+  const todoTasks = projectTasks.filter(
+    (task) => task.status === "todo",
+  ).length;
+
+  const inProgressTasks = projectTasks.filter(
+    (task) => task.status === "in_progress",
+  ).length;
+
+  const reviewTasks = projectTasks.filter(
+    (task) => task.status === "review",
+  ).length;
+
+  const completedTasks = projectTasks.filter(
+    (task) => task.status === "done",
+  ).length;
+
+  const projectProgress =
+    totalTasks > 0
+      ? Math.round(
+          (completedTasks / totalTasks) * 100,
+        )
+      : 0;
+
+  const totalGroups = groups.length;
+  const totalMembers = projectMembers.length;
+
+  const projectStatusLabel =
+    selectedProject?.status === "completed"
+      ? "Đã hoàn thành"
+      : "Đang thực hiện";
+
+  // =====================================================
+  // STATE DỰ ÁN
+  // =====================================================
 
   const [editingProjectId, setEditingProjectId] =
     useState(null);
@@ -232,8 +348,14 @@ export default function ProjectManagement() {
 
   const [joinCode, setJoinCode] = useState("");
   const [searchKeyword, setSearchKeyword] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] =
+    useState("all");
+
   const [viewMode, setViewMode] = useState("grid");
+
+  // =====================================================
+  // STATE TASK
+  // =====================================================
 
   const [isTaskModalOpen, setIsTaskModalOpen] =
     useState(false);
@@ -245,6 +367,7 @@ export default function ProjectManagement() {
     useState(null);
 
   const [taskGroupId, setTaskGroupId] = useState("");
+
   const [taskGroupAssignments, setTaskGroupAssignments] =
     useState({});
 
@@ -253,12 +376,16 @@ export default function ProjectManagement() {
 
   const [savingTask, setSavingTask] = useState(false);
 
-  // Form Task có thêm 3 trường thời gian dự kiến
   const [taskForm, setTaskForm] = useState({
     ...EMPTY_TASK_FORM,
   });
 
+  // =====================================================
+  // STATE THÔNG BÁO
+  // =====================================================
+
   const [toastList, setToastList] = useState([]);
+
   const [isCreatingProject, setIsCreatingProject] =
     useState(false);
 
@@ -266,6 +393,35 @@ export default function ProjectManagement() {
     useState(false);
 
   const [copiedId, setCopiedId] = useState(null);
+
+  // =====================================================
+  // THÔNG BÁO
+  // =====================================================
+
+  const showNotification = (type, title, message) => {
+    const id = Date.now();
+
+    setToastList((prev) => [
+      ...prev,
+      { id, type, title, message },
+    ]);
+
+    setTimeout(() => {
+      setToastList((prev) =>
+        prev.filter((toast) => toast.id !== id),
+      );
+    }, 4000);
+  };
+
+  const removeToast = (id) => {
+    setToastList((prev) =>
+      prev.filter((toast) => toast.id !== id),
+    );
+  };
+
+  // =====================================================
+  // TẢI DỮ LIỆU BAN ĐẦU
+  // =====================================================
 
   useEffect(() => {
     fetchProjectList();
@@ -275,6 +431,7 @@ export default function ProjectManagement() {
       .catch(() => setCurrentUser(null));
   }, []);
 
+  // Tải danh sách nhóm
   useEffect(() => {
     setGroups([]);
 
@@ -305,12 +462,16 @@ export default function ProjectManagement() {
     };
   }, [selectedProject?.id]);
 
+  // Tải Task của dự án
   useEffect(() => {
-    if (selectedProject) {
+    if (selectedProject?.id) {
       fetchProjectTasks(selectedProject.id);
+    } else {
+      setProjectTasks([]);
     }
   }, [selectedProject?.id]);
 
+  // Tải thành viên dự án
   useEffect(() => {
     const projectId = selectedProject?.id;
 
@@ -319,6 +480,7 @@ export default function ProjectManagement() {
       return;
     }
 
+    setProjectMembers([]);
     setIsLoadingMembers(true);
 
     sendAuthenticatedRequest(
@@ -343,26 +505,9 @@ export default function ProjectManagement() {
       });
   }, [selectedProject?.id]);
 
-  const showNotification = (type, title, message) => {
-    const id = Date.now();
-
-    setToastList((prev) => [
-      ...prev,
-      { id, type, title, message },
-    ]);
-
-    setTimeout(() => {
-      setToastList((prev) =>
-        prev.filter((t) => t.id !== id),
-      );
-    }, 4000);
-  };
-
-  const removeToast = (id) => {
-    setToastList((prev) =>
-      prev.filter((t) => t.id !== id),
-    );
-  };
+  // =====================================================
+  // API DỰ ÁN
+  // =====================================================
 
   const fetchProjectList = async () => {
     setIsLoadingProjects(true);
@@ -397,8 +542,12 @@ export default function ProjectManagement() {
         `/tasks?project_id=${projectId}`,
       );
 
-      setProjectTasks(data || []);
+      setProjectTasks(
+        Array.isArray(data) ? data : [],
+      );
     } catch (error) {
+      setProjectTasks([]);
+
       showNotification(
         "loi",
         "Không tải được công việc",
@@ -465,10 +614,16 @@ export default function ProjectManagement() {
       );
 
       setProjectList((prev) =>
-        prev.map((p) =>
-          p.id === updated.id ? updated : p,
+        prev.map((projectItem) =>
+          projectItem.id === updated.id
+            ? updated
+            : projectItem,
         ),
       );
+
+      if (selectedProject?.id === updated.id) {
+        setSelectedProject(updated);
+      }
 
       showNotification(
         "thanh-cong",
@@ -499,15 +654,19 @@ export default function ProjectManagement() {
         "Thiếu thông tin",
         "Vui lòng nhập tên và thời gian dự án.",
       );
+
       return;
     }
 
-    if (projectForm.end_date < projectForm.start_date) {
+    if (
+      projectForm.end_date < projectForm.start_date
+    ) {
       showNotification(
         "loi",
         "Ngày không hợp lệ",
         "Ngày kết thúc không được trước ngày bắt đầu.",
       );
+
       return;
     }
 
@@ -516,29 +675,36 @@ export default function ProjectManagement() {
     setIsCreatingProject(true);
 
     try {
-      const newProject = await sendAuthenticatedRequest(
-        editingProjectId
-          ? `/projects/${editingProjectId}`
-          : "/projects",
-        {
-          method: editingProjectId ? "PUT" : "POST",
-          body: JSON.stringify({
-            name,
-            description:
-              projectForm.description.trim() || null,
-            start_date: projectForm.start_date,
-            end_date: projectForm.end_date,
-          }),
-        },
-      );
+      const newProject =
+        await sendAuthenticatedRequest(
+          editingProjectId
+            ? `/projects/${editingProjectId}`
+            : "/projects",
+          {
+            method: editingProjectId ? "PUT" : "POST",
+            body: JSON.stringify({
+              name,
+              description:
+                projectForm.description.trim() || null,
+              start_date: projectForm.start_date,
+              end_date: projectForm.end_date,
+            }),
+          },
+        );
 
       setProjectList((prev) =>
         editingProjectId
-          ? prev.map((p) =>
-              p.id === newProject.id ? newProject : p,
+          ? prev.map((project) =>
+              project.id === newProject.id
+                ? newProject
+                : project,
             )
           : [newProject, ...prev],
       );
+
+      if (selectedProject?.id === newProject.id) {
+        setSelectedProject(newProject);
+      }
 
       setEditingProjectId(null);
 
@@ -575,19 +741,22 @@ export default function ProjectManagement() {
     setIsJoiningProject(true);
 
     try {
-      const joinedProject = await sendAuthenticatedRequest(
-        "/projects/join",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            join_code: joinCode.trim(),
-          }),
-        },
-      );
+      const joinedProject =
+        await sendAuthenticatedRequest(
+          "/projects/join",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              join_code: joinCode.trim(),
+            }),
+          },
+        );
 
       setProjectList((prev) => [
         joinedProject,
-        ...prev,
+        ...prev.filter(
+          (project) => project.id !== joinedProject.id,
+        ),
       ]);
 
       showNotification(
@@ -659,21 +828,25 @@ export default function ProjectManagement() {
     }
   };
 
+  // =====================================================
+  // CẬP NHẬT TRẠNG THÁI TASK
+  // =====================================================
+
   const changeTaskStatus = async (
     taskId,
     targetStatus,
   ) => {
     const originalTask = projectTasks.find(
-      (t) => t.id === taskId,
+      (task) => task.id === taskId,
     );
 
     if (!originalTask) return;
 
     setProjectTasks((prev) =>
-      prev.map((t) =>
-        t.id === taskId
-          ? { ...t, status: targetStatus }
-          : t,
+      prev.map((task) =>
+        task.id === taskId
+          ? { ...task, status: targetStatus }
+          : task,
       ),
     );
 
@@ -695,8 +868,10 @@ export default function ProjectManagement() {
       );
     } catch (error) {
       setProjectTasks((prev) =>
-        prev.map((t) =>
-          t.id === taskId ? originalTask : t,
+        prev.map((task) =>
+          task.id === taskId
+            ? originalTask
+            : task,
         ),
       );
 
@@ -708,7 +883,10 @@ export default function ProjectManagement() {
     }
   };
 
-  // Đọc phân công hiện tại qua API Kanban nhóm
+  // =====================================================
+  // PHÂN CÔNG TASK CHO NHÓM
+  // =====================================================
+
   const loadTaskGroupAssignments = async () => {
     if (!selectedProject?.id || !isProjectOwner) {
       return {};
@@ -783,7 +961,10 @@ export default function ProjectManagement() {
     });
   };
 
-  // Lưu Task và 3 mức thời gian dự kiến
+  // =====================================================
+  // LƯU TASK
+  // =====================================================
+
   const handleSaveTask = async (e) => {
     e.preventDefault();
 
@@ -793,6 +974,7 @@ export default function ProjectManagement() {
         "Quyền truy cập",
         "Chỉ Chủ dự án được chỉnh sửa Task cấp dự án!",
       );
+
       return;
     }
 
@@ -800,7 +982,8 @@ export default function ProjectManagement() {
       return;
     }
 
-    const estimateError = validateTaskEstimates(taskForm);
+    const estimateError =
+      validateTaskEstimates(taskForm);
 
     if (estimateError) {
       showNotification(
@@ -808,6 +991,7 @@ export default function ProjectManagement() {
         "Thời gian dự kiến không hợp lệ",
         estimateError,
       );
+
       return;
     }
 
@@ -832,7 +1016,6 @@ export default function ProjectManagement() {
             ).toISOString()
           : null,
 
-        // Ba mức thời gian dự kiến theo ngày
         ...getTaskEstimatePayload(taskForm),
       };
 
@@ -906,7 +1089,6 @@ export default function ProjectManagement() {
           () => {},
         );
 
-        // Task đã lưu, giữ form để xử lý phân nhóm
         return;
       }
 
@@ -925,7 +1107,10 @@ export default function ProjectManagement() {
     }
   };
 
-  // Mở form chỉnh sửa Task và đọc thời gian từ Backend
+  // =====================================================
+  // MỞ FORM CHỈNH SỬA TASK
+  // =====================================================
+
   const openEditTaskModal = (task) => {
     if (!canManageKanban) {
       showNotification(
@@ -933,6 +1118,7 @@ export default function ProjectManagement() {
         "Hạn chế quyền",
         "Chỉ Chủ dự án mới có thể chỉnh sửa Task.",
       );
+
       return;
     }
 
@@ -979,7 +1165,10 @@ export default function ProjectManagement() {
     setIsTaskModalOpen(true);
   };
 
-  // Mở form tạo Task
+  // =====================================================
+  // MỞ FORM TẠO TASK
+  // =====================================================
+
   const openCreateTaskModal = (columnKey) => {
     if (!canManageKanban) {
       showNotification(
@@ -987,6 +1176,7 @@ export default function ProjectManagement() {
         "Hạn chế quyền",
         "Chỉ Chủ dự án mới có quyền tạo Task mới.",
       );
+
       return;
     }
 
@@ -1007,6 +1197,10 @@ export default function ProjectManagement() {
     setIsTaskModalOpen(true);
   };
 
+  // =====================================================
+  // XÓA TASK
+  // =====================================================
+
   const handleDeleteTask = async (
     taskId,
     title,
@@ -1017,6 +1211,7 @@ export default function ProjectManagement() {
         "Hạn chế quyền",
         "Chỉ Chủ dự án mới có quyền xóa Task.",
       );
+
       return;
     }
 
@@ -1035,7 +1230,7 @@ export default function ProjectManagement() {
       );
 
       setProjectTasks((prev) =>
-        prev.filter((t) => t.id !== taskId),
+        prev.filter((task) => task.id !== taskId),
       );
 
       showNotification(
@@ -1052,15 +1247,25 @@ export default function ProjectManagement() {
     }
   };
 
+  // =====================================================
+  // LỌC DANH SÁCH DỰ ÁN
+  // =====================================================
+
   const filteredProjects = projectList.filter(
     (project) => {
+      const projectName = (
+        project.name || ""
+      ).toLowerCase();
+
+      const projectJoinCode = (
+        project.join_code || ""
+      ).toLowerCase();
+
+      const keyword = searchKeyword.toLowerCase();
+
       const matchesKeyword =
-        project.name
-          .toLowerCase()
-          .includes(searchKeyword.toLowerCase()) ||
-        project.join_code
-          .toLowerCase()
-          .includes(searchKeyword.toLowerCase());
+        projectName.includes(keyword) ||
+        projectJoinCode.includes(keyword);
 
       const matchesStatus =
         statusFilter === "all" ||
@@ -1070,8 +1275,13 @@ export default function ProjectManagement() {
     },
   );
 
+  // =====================================================
+  // GIAO DIỆN
+  // =====================================================
+
   return (
     <div className="khung-quan-ly-du-an">
+      {/* THÔNG BÁO */}
       <div className="khung-chua-toast">
         {toastList.map((toast) => (
           <div
@@ -1082,12 +1292,15 @@ export default function ProjectManagement() {
               {toast.type === "thanh-cong" && (
                 <CheckCircle2 size={20} />
               )}
+
               {toast.type === "loi" && (
                 <AlertCircle size={20} />
               )}
+
               {toast.type === "thong-tin" && (
                 <Info size={20} />
               )}
+
               {toast.type === "can-bao" && (
                 <AlertTriangle size={20} />
               )}
@@ -1097,6 +1310,7 @@ export default function ProjectManagement() {
               <div className="tieu-de-thong-bao">
                 {toast.title}
               </div>
+
               <div className="chi-tiet-thong-bao">
                 {toast.message}
               </div>
@@ -1114,6 +1328,7 @@ export default function ProjectManagement() {
 
       {selectedProject ? (
         <div>
+          {/* HEADER DỰ ÁN */}
           <div
             className="phan-header-kanban"
             style={{ marginBottom: "16px" }}
@@ -1129,7 +1344,7 @@ export default function ProjectManagement() {
             <div className="khung-tieu-de-kanban">
               <div className="avatar-du-an">
                 {selectedProject.name
-                  .charAt(0)
+                  ?.charAt(0)
                   .toUpperCase()}
               </div>
 
@@ -1145,12 +1360,16 @@ export default function ProjectManagement() {
                     gap: "8px",
                     alignItems: "center",
                     marginTop: "4px",
+                    flexWrap: "wrap",
                   }}
                 >
                   <span>
                     Mã:{" "}
-                    <strong style={{ color: "#38bdf8" }}>
-                      {selectedProject.join_code}
+                    <strong
+                      style={{ color: "#38bdf8" }}
+                    >
+                      {selectedProject.join_code ||
+                        "Chưa có"}
                     </strong>
                   </span>
 
@@ -1204,7 +1423,34 @@ export default function ProjectManagement() {
             }}
           >
             <button
-              onClick={() => setActiveTab("kanban")}
+              onClick={() =>
+                setActiveTab("overview")
+              }
+              style={{
+                background:
+                  activeTab === "overview"
+                    ? "#4f46e5"
+                    : "#1e293b",
+                color: "#fff",
+                border: "1px solid #334155",
+                padding: "8px 16px",
+                borderRadius: "8px",
+                fontSize: "13px",
+                fontWeight: 600,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              <BarChart2 size={15} />
+              Tổng quan dự án
+            </button>
+
+            <button
+              onClick={() =>
+                setActiveTab("kanban")
+              }
               style={{
                 background:
                   activeTab === "kanban"
@@ -1227,7 +1473,9 @@ export default function ProjectManagement() {
             </button>
 
             <button
-              onClick={() => setActiveTab("groups")}
+              onClick={() =>
+                setActiveTab("groups")
+              }
               style={{
                 background:
                   activeTab === "groups"
@@ -1250,7 +1498,9 @@ export default function ProjectManagement() {
             </button>
 
             <button
-              onClick={() => setActiveTab("code")}
+              onClick={() =>
+                setActiveTab("code")
+              }
               style={{
                 background:
                   activeTab === "code"
@@ -1273,7 +1523,9 @@ export default function ProjectManagement() {
             </button>
 
             <button
-              onClick={() => setActiveTab("review")}
+              onClick={() =>
+                setActiveTab("review")
+              }
               style={{
                 background:
                   activeTab === "review"
@@ -1296,7 +1548,9 @@ export default function ProjectManagement() {
             </button>
 
             <button
-              onClick={() => setActiveTab("cost")}
+              onClick={() =>
+                setActiveTab("cost")
+              }
               style={{
                 background:
                   activeTab === "cost"
@@ -1319,13 +1573,989 @@ export default function ProjectManagement() {
             </button>
           </div>
 
+          {/* =================================================
+              0. TỔNG QUAN DỰ ÁN
+          ================================================= */}
+
+          {activeTab === "overview" && (
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "20px",
+                color: "#e2e8f0",
+              }}
+            >
+              {/* THÔNG TIN CHUNG */}
+              <div
+                style={{
+                  background:
+                    "linear-gradient(135deg, #1e293b, #172554)",
+                  border: "1px solid #334155",
+                  borderRadius: "14px",
+                  padding: "22px",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "flex-start",
+                    gap: "16px",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div style={{ flex: 1 }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "10px",
+                        marginBottom: "12px",
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <h2
+                        style={{
+                          margin: 0,
+                          fontSize: "21px",
+                          fontWeight: 700,
+                          color: "#f8fafc",
+                        }}
+                      >
+                        {selectedProject.name}
+                      </h2>
+
+                      <span
+                        style={{
+                          background:
+                            selectedProject.status ===
+                            "completed"
+                              ? "rgba(52,211,153,0.15)"
+                              : "rgba(56,189,248,0.15)",
+                          color:
+                            selectedProject.status ===
+                            "completed"
+                              ? "#34d399"
+                              : "#38bdf8",
+                          padding: "5px 10px",
+                          borderRadius: "20px",
+                          fontSize: "12px",
+                          fontWeight: 600,
+                        }}
+                      >
+                        {projectStatusLabel}
+                      </span>
+                    </div>
+
+                    <p
+                      style={{
+                        margin: 0,
+                        color: "#cbd5e1",
+                        fontSize: "14px",
+                        lineHeight: 1.7,
+                        whiteSpace: "pre-wrap",
+                        overflowWrap: "anywhere",
+                      }}
+                    >
+                      {selectedProject.description ||
+                        "Dự án chưa có mô tả."}
+                    </p>
+                  </div>
+
+                  <div
+                    style={{
+                      background: "rgba(15,23,42,0.6)",
+                      border: "1px solid #475569",
+                      borderRadius: "10px",
+                      padding: "12px 16px",
+                      minWidth: "160px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        color: "#94a3b8",
+                        fontSize: "12px",
+                        marginBottom: "5px",
+                      }}
+                    >
+                      Mã tham gia dự án
+                    </div>
+
+                    <div
+                      style={{
+                        color: "#38bdf8",
+                        fontWeight: 700,
+                        fontSize: "18px",
+                        letterSpacing: "1px",
+                      }}
+                    >
+                      {selectedProject.join_code ||
+                        "Chưa có"}
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns:
+                      "repeat(auto-fit, minmax(180px, 1fr))",
+                    gap: "14px",
+                    marginTop: "22px",
+                    paddingTop: "18px",
+                    borderTop: "1px solid #334155",
+                  }}
+                >
+                  <div>
+                    <div
+                      style={{
+                        color: "#94a3b8",
+                        fontSize: "12px",
+                        marginBottom: "6px",
+                      }}
+                    >
+                      <Clock
+                        size={13}
+                        style={{
+                          display: "inline",
+                          marginRight: "5px",
+                        }}
+                      />
+                      Ngày bắt đầu
+                    </div>
+
+                    <strong style={{ fontSize: "14px" }}>
+                      {formatProjectDate(
+                        selectedProject.start_date,
+                      )}
+                    </strong>
+                  </div>
+
+                  <div>
+                    <div
+                      style={{
+                        color: "#94a3b8",
+                        fontSize: "12px",
+                        marginBottom: "6px",
+                      }}
+                    >
+                      <Clock
+                        size={13}
+                        style={{
+                          display: "inline",
+                          marginRight: "5px",
+                        }}
+                      />
+                      Ngày kết thúc
+                    </div>
+
+                    <strong style={{ fontSize: "14px" }}>
+                      {formatProjectDate(
+                        selectedProject.end_date,
+                      )}
+                    </strong>
+                  </div>
+
+                  <div>
+                    <div
+                      style={{
+                        color: "#94a3b8",
+                        fontSize: "12px",
+                        marginBottom: "6px",
+                      }}
+                    >
+                      <Users
+                        size={13}
+                        style={{
+                          display: "inline",
+                          marginRight: "5px",
+                        }}
+                      />
+                      Vai trò của bạn
+                    </div>
+
+                    <strong style={{ fontSize: "14px" }}>
+                      {isProjectOwner
+                        ? "Chủ dự án"
+                        : isAnyGroupLeader
+                          ? "Trưởng nhóm"
+                          : "Thành viên"}
+                    </strong>
+                  </div>
+                </div>
+              </div>
+
+              {/* CÁC THẺ THỐNG KÊ */}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns:
+                    "repeat(auto-fit, minmax(180px, 1fr))",
+                  gap: "14px",
+                }}
+              >
+                {[
+                  {
+                    label: "Tổng công việc",
+                    value: totalTasks,
+                    icon: <FolderKanban size={21} />,
+                    color: "#818cf8",
+                    background:
+                      "rgba(99,102,241,0.15)",
+                  },
+                  {
+                    label: "Đang thực hiện",
+                    value: inProgressTasks,
+                    icon: <Clock size={21} />,
+                    color: "#fbbf24",
+                    background:
+                      "rgba(245,158,11,0.15)",
+                  },
+                  {
+                    label: "Đã hoàn thành",
+                    value: completedTasks,
+                    icon: <CheckSquare size={21} />,
+                    color: "#34d399",
+                    background:
+                      "rgba(52,211,153,0.15)",
+                  },
+                  {
+                    label: "Thành viên",
+                    value: totalMembers,
+                    icon: <Users size={21} />,
+                    color: "#38bdf8",
+                    background:
+                      "rgba(56,189,248,0.15)",
+                  },
+                  {
+                    label: "Nhóm",
+                    value: totalGroups,
+                    icon: <FolderPlus size={21} />,
+                    color: "#c084fc",
+                    background:
+                      "rgba(192,132,252,0.15)",
+                  },
+                ].map((item) => (
+                  <div
+                    key={item.label}
+                    style={{
+                      background: "#1e293b",
+                      border: "1px solid #334155",
+                      borderRadius: "12px",
+                      padding: "17px",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "13px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: "44px",
+                        height: "44px",
+                        borderRadius: "10px",
+                        background: item.background,
+                        color: item.color,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {item.icon}
+                    </div>
+
+                    <div>
+                      <div
+                        style={{
+                          color: "#94a3b8",
+                          fontSize: "12px",
+                          marginBottom: "5px",
+                        }}
+                      >
+                        {item.label}
+                      </div>
+
+                      <div
+                        style={{
+                          color: "#f8fafc",
+                          fontSize: "23px",
+                          fontWeight: 700,
+                        }}
+                      >
+                        {item.value}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* TIẾN ĐỘ DỰ ÁN */}
+              <div
+                style={{
+                  background: "#1e293b",
+                  border: "1px solid #334155",
+                  borderRadius: "12px",
+                  padding: "20px",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: "12px",
+                    flexWrap: "wrap",
+                    marginBottom: "14px",
+                  }}
+                >
+                  <div>
+                    <h3
+                      style={{
+                        margin: 0,
+                        color: "#f8fafc",
+                        fontSize: "16px",
+                      }}
+                    >
+                      Tiến độ hoàn thành dự án
+                    </h3>
+
+                    <p
+                      style={{
+                        margin: "5px 0 0",
+                        color: "#94a3b8",
+                        fontSize: "12px",
+                      }}
+                    >
+                      Tỷ lệ Task cấp dự án đã hoàn thành
+                    </p>
+                  </div>
+
+                  <strong
+                    style={{
+                      fontSize: "26px",
+                      color: "#34d399",
+                    }}
+                  >
+                    {isLoadingTasks
+                      ? "..."
+                      : `${projectProgress}%`}
+                  </strong>
+                </div>
+
+                <div
+                  style={{
+                    height: "12px",
+                    background: "#0f172a",
+                    borderRadius: "20px",
+                    overflow: "hidden",
+                  }}
+                >
+                  <div
+                    style={{
+                      height: "100%",
+                      width: `${projectProgress}%`,
+                      background:
+                        "linear-gradient(90deg, #6366f1, #34d399)",
+                      borderRadius: "20px",
+                      transition: "width 0.3s ease",
+                    }}
+                  />
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns:
+                      "repeat(auto-fit, minmax(120px, 1fr))",
+                    gap: "12px",
+                    marginTop: "18px",
+                  }}
+                >
+                  {[
+                    {
+                      label: "Cần làm",
+                      value: todoTasks,
+                      color: "#94a3b8",
+                    },
+                    {
+                      label: "Đang thực hiện",
+                      value: inProgressTasks,
+                      color: "#fbbf24",
+                    },
+                    {
+                      label: "Đang kiểm tra",
+                      value: reviewTasks,
+                      color: "#38bdf8",
+                    },
+                    {
+                      label: "Hoàn thành",
+                      value: completedTasks,
+                      color: "#34d399",
+                    },
+                  ].map((item) => (
+                    <div
+                      key={item.label}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        color: "#cbd5e1",
+                        fontSize: "13px",
+                      }}
+                    >
+                      <span
+                        style={{
+                          width: "9px",
+                          height: "9px",
+                          borderRadius: "50%",
+                          background: item.color,
+                          flexShrink: 0,
+                        }}
+                      />
+
+                      <span>{item.label}</span>
+
+                      <strong
+                        style={{
+                          color: "#f8fafc",
+                          marginLeft: "auto",
+                        }}
+                      >
+                        {isLoadingTasks
+                          ? "..."
+                          : item.value}
+                      </strong>
+                    </div>
+                  ))}
+                </div>
+
+                {totalTasks === 0 &&
+                  !isLoadingTasks && (
+                    <p
+                      style={{
+                        color: "#94a3b8",
+                        fontSize: "12px",
+                        margin: "14px 0 0",
+                      }}
+                    >
+                      Dự án chưa có Task cấp dự án để
+                      tính tiến độ.
+                    </p>
+                  )}
+              </div>
+
+              {/* DANH SÁCH NHÓM */}
+              <div
+                style={{
+                  background: "#1e293b",
+                  border: "1px solid #334155",
+                  borderRadius: "12px",
+                  padding: "20px",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: "10px",
+                    marginBottom: "16px",
+                  }}
+                >
+                  <h3
+                    style={{
+                      margin: 0,
+                      color: "#f8fafc",
+                      fontSize: "16px",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                    }}
+                  >
+                    <Users size={18} color="#c084fc" />
+                    Các nhóm trong dự án
+                  </h3>
+
+                  <button
+                    onClick={() =>
+                      setActiveTab("groups")
+                    }
+                    style={{
+                      border: "1px solid #475569",
+                      background: "#0f172a",
+                      color: "#cbd5e1",
+                      borderRadius: "7px",
+                      padding: "7px 11px",
+                      cursor: "pointer",
+                      fontSize: "12px",
+                    }}
+                  >
+                    Quản lý nhóm
+                    <ArrowRight
+                      size={13}
+                      style={{
+                        display: "inline",
+                        marginLeft: "5px",
+                        verticalAlign: "middle",
+                      }}
+                    />
+                  </button>
+                </div>
+
+                {groups.length > 0 ? (
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns:
+                        "repeat(auto-fit, minmax(220px, 1fr))",
+                      gap: "12px",
+                    }}
+                  >
+                    {groups.map((group) => (
+                      <div
+                        key={group.id}
+                        style={{
+                          background: "#0f172a",
+                          border: "1px solid #334155",
+                          borderRadius: "9px",
+                          padding: "14px",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "9px",
+                            marginBottom: "9px",
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: "34px",
+                              height: "34px",
+                              borderRadius: "8px",
+                              background:
+                                "rgba(192,132,252,0.15)",
+                              color: "#c084fc",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                            }}
+                          >
+                            <FolderKanban size={17} />
+                          </div>
+
+                          <strong
+                            style={{
+                              color: "#f8fafc",
+                              fontSize: "14px",
+                            }}
+                          >
+                            {group.name}
+                          </strong>
+                        </div>
+
+                        <div
+                          style={{
+                            color: "#94a3b8",
+                            fontSize: "12px",
+                          }}
+                        >
+                          Trưởng nhóm:{" "}
+                          <span
+                            style={{ color: "#e2e8f0" }}
+                          >
+                            {group.leader ||
+                              group.leader_name ||
+                              "Chưa phân công"}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      textAlign: "center",
+                      color: "#94a3b8",
+                      padding: "20px",
+                      fontSize: "13px",
+                    }}
+                  >
+                    Chưa có nhóm nào trong dự án.
+                  </div>
+                )}
+              </div>
+
+              {/* DANH SÁCH TASK */}
+              <div
+                style={{
+                  background: "#1e293b",
+                  border: "1px solid #334155",
+                  borderRadius: "12px",
+                  padding: "20px",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: "10px",
+                    marginBottom: "16px",
+                  }}
+                >
+                  <h3
+                    style={{
+                      margin: 0,
+                      color: "#f8fafc",
+                      fontSize: "16px",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                    }}
+                  >
+                    <CheckSquare
+                      size={18}
+                      color="#818cf8"
+                    />
+                    Công việc gần đây
+                  </h3>
+
+                  <button
+                    onClick={() =>
+                      setActiveTab("kanban")
+                    }
+                    style={{
+                      border: "1px solid #475569",
+                      background: "#0f172a",
+                      color: "#cbd5e1",
+                      borderRadius: "7px",
+                      padding: "7px 11px",
+                      cursor: "pointer",
+                      fontSize: "12px",
+                    }}
+                  >
+                    Xem Kanban
+                    <ArrowRight
+                      size={13}
+                      style={{
+                        display: "inline",
+                        marginLeft: "5px",
+                        verticalAlign: "middle",
+                      }}
+                    />
+                  </button>
+                </div>
+
+                {isLoadingTasks ? (
+                  <div
+                    style={{
+                      textAlign: "center",
+                      padding: "24px",
+                      color: "#94a3b8",
+                    }}
+                  >
+                    <Loader2
+                      size={24}
+                      className="icon-quay"
+                    />
+                    <p>Đang tải công việc...</p>
+                  </div>
+                ) : projectTasks.length > 0 ? (
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "9px",
+                    }}
+                  >
+                    {projectTasks
+                      .slice(0, 8)
+                      .map((task) => (
+                        <div
+                          key={task.id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: "12px",
+                            flexWrap: "wrap",
+                            background: "#0f172a",
+                            border: "1px solid #334155",
+                            borderRadius: "8px",
+                            padding: "12px 14px",
+                          }}
+                        >
+                          <div
+                            style={{
+                              minWidth: 0,
+                              flex: 1,
+                            }}
+                          >
+                            <div
+                              style={{
+                                color: "#f8fafc",
+                                fontSize: "13px",
+                                fontWeight: 600,
+                                overflowWrap: "anywhere",
+                              }}
+                            >
+                              {task.title}
+                            </div>
+
+                            <div
+                              style={{
+                                color: "#94a3b8",
+                                fontSize: "11px",
+                                marginTop: "5px",
+                              }}
+                            >
+                              Người thực hiện:{" "}
+                              {task.assignee ||
+                                "Chưa phân công"}
+                            </div>
+                          </div>
+
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            <span
+                              style={{
+                                background:
+                                  "rgba(148,163,184,0.12)",
+                                color:
+                                  getTaskPriorityColor(
+                                    task.priority,
+                                  ),
+                                border: `1px solid ${getTaskPriorityColor(
+                                  task.priority,
+                                )}55`,
+                                padding: "4px 8px",
+                                borderRadius: "6px",
+                                fontSize: "11px",
+                              }}
+                            >
+                              Ưu tiên:{" "}
+                              {getTaskPriorityLabel(
+                                task.priority,
+                              )}
+                            </span>
+
+                            <span
+                              style={{
+                                background:
+                                  `${getTaskStatusColor(task.status)}18`,
+                                color:
+                                  getTaskStatusColor(
+                                    task.status,
+                                  ),
+                                border: `1px solid ${getTaskStatusColor(
+                                  task.status,
+                                )}55`,
+                                padding: "4px 8px",
+                                borderRadius: "6px",
+                                fontSize: "11px",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {getTaskStatusLabel(
+                                task.status,
+                              )}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+
+                    {projectTasks.length > 8 && (
+                      <div
+                        style={{
+                          textAlign: "center",
+                          color: "#94a3b8",
+                          fontSize: "12px",
+                          paddingTop: "5px",
+                        }}
+                      >
+                        Hiển thị 8/{projectTasks.length}{" "}
+                        công việc. Chuyển sang Kanban để
+                        xem toàn bộ.
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      textAlign: "center",
+                      color: "#94a3b8",
+                      padding: "20px",
+                      fontSize: "13px",
+                    }}
+                  >
+                    Dự án chưa có công việc nào.
+                  </div>
+                )}
+              </div>
+
+              {/* DANH SÁCH THÀNH VIÊN */}
+              <div
+                style={{
+                  background: "#1e293b",
+                  border: "1px solid #334155",
+                  borderRadius: "12px",
+                  padding: "20px",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: "10px",
+                    marginBottom: "16px",
+                  }}
+                >
+                  <h3
+                    style={{
+                      margin: 0,
+                      color: "#f8fafc",
+                      fontSize: "16px",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                    }}
+                  >
+                    <Users size={18} color="#38bdf8" />
+                    Thành viên dự án
+                  </h3>
+
+                  <span
+                    style={{
+                      color: "#94a3b8",
+                      fontSize: "12px",
+                    }}
+                  >
+                    {isLoadingMembers
+                      ? "Đang tải..."
+                      : `${totalMembers} thành viên`}
+                  </span>
+                </div>
+
+                {isLoadingMembers ? (
+                  <div
+                    style={{
+                      textAlign: "center",
+                      padding: "24px",
+                      color: "#94a3b8",
+                    }}
+                  >
+                    <Loader2
+                      size={24}
+                      className="icon-quay"
+                    />
+                    <p>Đang tải thành viên...</p>
+                  </div>
+                ) : projectMembers.length > 0 ? (
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns:
+                        "repeat(auto-fit, minmax(220px, 1fr))",
+                      gap: "10px",
+                    }}
+                  >
+                    {projectMembers.map((member) => (
+                      <div
+                        key={member.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "11px",
+                          background: "#0f172a",
+                          border: "1px solid #334155",
+                          borderRadius: "9px",
+                          padding: "12px",
+                        }}
+                      >
+                        <div
+                          style={{
+                            width: "38px",
+                            height: "38px",
+                            borderRadius: "50%",
+                            background:
+                              "rgba(56,189,248,0.15)",
+                            color: "#38bdf8",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontWeight: 700,
+                            flexShrink: 0,
+                          }}
+                        >
+                          {(member.name || "?")
+                            .charAt(0)
+                            .toUpperCase()}
+                        </div>
+
+                        <div
+                          style={{
+                            minWidth: 0,
+                          }}
+                        >
+                          <div
+                            style={{
+                              color: "#f8fafc",
+                              fontSize: "13px",
+                              fontWeight: 600,
+                            }}
+                          >
+                            {member.name ||
+                              "Chưa cập nhật tên"}
+                          </div>
+
+                          <div
+                            style={{
+                              color: "#94a3b8",
+                              fontSize: "11px",
+                              overflowWrap: "anywhere",
+                              marginTop: "3px",
+                            }}
+                          >
+                            {member.email || ""}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      textAlign: "center",
+                      color: "#94a3b8",
+                      padding: "20px",
+                      fontSize: "13px",
+                    }}
+                  >
+                    Chưa có thông tin thành viên.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* 1. BẢNG KANBAN */}
           {activeTab === "kanban" && (
             <>
               {!canManageKanban && (
                 <div
                   style={{
-                    background: "rgba(245, 158, 11, 0.1)",
+                    background:
+                      "rgba(245, 158, 11, 0.1)",
                     border:
                       "1px solid rgba(245, 158, 11, 0.3)",
                     padding: "10px 14px",
@@ -1340,8 +2570,8 @@ export default function ProjectManagement() {
                 >
                   <Lock size={16} />
                   Bạn đang truy cập dưới quyền Thành viên.
-                  Chỉ Chủ dự án mới có quyền Thêm / Sửa / Xóa
-                  công việc.
+                  Chỉ Chủ dự án mới có quyền Thêm / Sửa /
+                  Xóa công việc.
                 </div>
               )}
 
@@ -1350,7 +2580,8 @@ export default function ProjectManagement() {
                   <div
                     className="nen-icon-thong-ke"
                     style={{
-                      background: "rgba(99, 102, 241, 0.2)",
+                      background:
+                        "rgba(99, 102, 241, 0.2)",
                       color: "#818cf8",
                     }}
                   >
@@ -1367,7 +2598,8 @@ export default function ProjectManagement() {
                   <div
                     className="nen-icon-thong-ke"
                     style={{
-                      background: "rgba(245, 158, 11, 0.2)",
+                      background:
+                        "rgba(245, 158, 11, 0.2)",
                       color: "#fbbf24",
                     }}
                   >
@@ -1379,7 +2611,8 @@ export default function ProjectManagement() {
                     <p>
                       {
                         projectTasks.filter(
-                          (t) => t.status === "in_progress",
+                          (task) =>
+                            task.status === "in_progress",
                         ).length
                       }{" "}
                       Tasks
@@ -1391,7 +2624,8 @@ export default function ProjectManagement() {
                   <div
                     className="nen-icon-thong-ke"
                     style={{
-                      background: "rgba(52, 211, 153, 0.2)",
+                      background:
+                        "rgba(52, 211, 153, 0.2)",
                       color: "#34d399",
                     }}
                   >
@@ -1403,7 +2637,8 @@ export default function ProjectManagement() {
                     <p>
                       {
                         projectTasks.filter(
-                          (t) => t.status === "done",
+                          (task) =>
+                            task.status === "done",
                         ).length
                       }{" "}
                       Tasks
@@ -1415,7 +2650,8 @@ export default function ProjectManagement() {
                   <div
                     className="nen-icon-thong-ke"
                     style={{
-                      background: "rgba(56, 189, 248, 0.2)",
+                      background:
+                        "rgba(56, 189, 248, 0.2)",
                       color: "#38bdf8",
                     }}
                   >
@@ -1428,7 +2664,8 @@ export default function ProjectManagement() {
                       {projectTasks.length > 0
                         ? Math.round(
                             (projectTasks.filter(
-                              (t) => t.status === "done",
+                              (task) =>
+                                task.status === "done",
                             ).length /
                               projectTasks.length) *
                               100,
@@ -1456,12 +2693,15 @@ export default function ProjectManagement() {
           {activeTab === "groups" && (
             <GroupManagement
               projectId={selectedProject.id}
+              project={selectedProject}
               groups={groups}
               setGroups={setGroups}
               projectMembers={projectMembers}
               projectTasks={projectTasks}
               isProjectOwner={isProjectOwner}
               currentUserId={currentUser?.id}
+              currentUserName={currentUserName}
+              currentUserEmail={currentUserEmail}
               showNotification={showNotification}
             />
           )}
@@ -1495,18 +2735,20 @@ export default function ProjectManagement() {
         </div>
       ) : (
         <>
+          {/* TRANG DANH SÁCH DỰ ÁN */}
           <div className="tieu-de-trang-quan-ly">
             <h2 className="tieu-de-chinh">
               Quản lý Dự án
             </h2>
 
             <p className="tieu-de-phu">
-              Khởi tạo dự án mới, phân quyền Trưởng nhóm và
-              theo dõi tiến độ công việc
+              Khởi tạo dự án mới, phân quyền Trưởng nhóm
+              và theo dõi tiến độ công việc
             </p>
           </div>
 
           <div className="luoi-hanh-dong-du-an">
+            {/* TẠO DỰ ÁN */}
             <div className="the-hanh-dong">
               <div className="bieu-tuong-the">
                 <FolderPlus size={22} />
@@ -1515,8 +2757,8 @@ export default function ProjectManagement() {
               <h3>Tạo Dự Án Mới</h3>
 
               <p className="mo-ta-the">
-                Thiết lập không gian quản lý tiến độ và công
-                việc riêng cho đội ngũ của bạn
+                Thiết lập không gian quản lý tiến độ và
+                công việc riêng cho đội ngũ của bạn
               </p>
 
               <button
@@ -1529,6 +2771,7 @@ export default function ProjectManagement() {
               </button>
             </div>
 
+            {/* THAM GIA DỰ ÁN */}
             <div className="the-hanh-dong">
               <div className="bieu-tuong-the phu">
                 <UserPlus size={22} />
@@ -1537,8 +2780,8 @@ export default function ProjectManagement() {
               <h3>Tham Gia Dự Án</h3>
 
               <p className="mo-ta-the">
-                Nhập mã mời (Join Code) được chia sẻ từ quản
-                trị viên để tham gia
+                Nhập mã mời (Join Code) được chia sẻ từ
+                quản trị viên để tham gia
               </p>
 
               <form
@@ -1587,6 +2830,7 @@ export default function ProjectManagement() {
             </div>
           </div>
 
+          {/* DANH SÁCH DỰ ÁN */}
           <div className="khung-danh-sach-du-an">
             <div className="thanh-tieu-de-section">
               <div className="nhom-tieu-de">
@@ -1627,9 +2871,11 @@ export default function ProjectManagement() {
                   <option value="all">
                     Tất cả trạng thái
                   </option>
+
                   <option value="active">
                     Đang thực hiện
                   </option>
+
                   <option value="completed">
                     Đã hoàn thành
                   </option>
@@ -1638,9 +2884,13 @@ export default function ProjectManagement() {
                 <div className="chuyen-che-do-xem">
                   <button
                     className={`nut-che-do ${
-                      viewMode === "grid" ? "dang-chon" : ""
+                      viewMode === "grid"
+                        ? "dang-chon"
+                        : ""
                     }`}
-                    onClick={() => setViewMode("grid")}
+                    onClick={() =>
+                      setViewMode("grid")
+                    }
                     title="Chế độ Lưới"
                   >
                     <LayoutGrid size={16} />
@@ -1648,9 +2898,13 @@ export default function ProjectManagement() {
 
                   <button
                     className={`nut-che-do ${
-                      viewMode === "list" ? "dang-chon" : ""
+                      viewMode === "list"
+                        ? "dang-chon"
+                        : ""
                     }`}
-                    onClick={() => setViewMode("list")}
+                    onClick={() =>
+                      setViewMode("list")
+                    }
                     title="Chế độ Danh sách"
                   >
                     <List size={16} />
@@ -1665,6 +2919,7 @@ export default function ProjectManagement() {
                   size={48}
                   className="icon-quay"
                 />
+
                 <p>Đang tải danh sách dự án...</p>
               </div>
             ) : filteredProjects.length > 0 ? (
@@ -1678,9 +2933,13 @@ export default function ProjectManagement() {
                       copiedId={copiedId}
                       copyJoinCode={copyJoinCode}
                       setSelectedProject={setSelectedProject}
-                      handleDeleteProject={handleDeleteProject}
+                      handleDeleteProject={
+                        handleDeleteProject
+                      }
                       onEditProject={openEditProject}
-                      onCompleteProject={markProjectComplete}
+                      onCompleteProject={
+                        markProjectComplete
+                      }
                     />
                   ))}
                 </div>
@@ -1694,9 +2953,13 @@ export default function ProjectManagement() {
                       copiedId={copiedId}
                       copyJoinCode={copyJoinCode}
                       setSelectedProject={setSelectedProject}
-                      handleDeleteProject={handleDeleteProject}
+                      handleDeleteProject={
+                        handleDeleteProject
+                      }
                       onEditProject={openEditProject}
-                      onCompleteProject={markProjectComplete}
+                      onCompleteProject={
+                        markProjectComplete
+                      }
                     />
                   ))}
                 </div>
@@ -1719,7 +2982,7 @@ export default function ProjectManagement() {
         </>
       )}
 
-      {/* MODAL TẠO DỰ ÁN */}
+      {/* MODAL TẠO / CHỈNH SỬA DỰ ÁN */}
       {isProjectModalOpen && (
         <div
           className="lop-phu-modal"
@@ -1771,35 +3034,42 @@ export default function ProjectManagement() {
                   placeholder="VD: Website Quản Lý Công Việc CNTT"
                   value={projectForm.name}
                   onChange={(e) =>
-                    setProjectForm((p) => ({
-                      ...p,
+                    setProjectForm((prev) => ({
+                      ...prev,
                       name: e.target.value,
                     }))
                   }
                 />
               </div>
 
+              {/* MÔ TẢ CHI TIẾT DỰ ÁN */}
               <div className="nhom-form-group">
                 <label
                   className="nhan-form"
                   htmlFor="project-description"
                 >
-                  Mô tả ngắn
+                  Mô tả chi tiết dự án
                 </label>
 
                 <textarea
                   id="project-description"
                   className="textarea-form"
-                  rows={3}
-                  maxLength={1000}
-                  placeholder="Mục tiêu và nội dung chính của dự án..."
+                  rows={8}
+                  placeholder="Nhập mô tả chi tiết dự án: mục tiêu, phạm vi, yêu cầu chức năng, công nghệ sử dụng, kế hoạch triển khai, các yêu cầu và thông tin liên quan..."
                   value={projectForm.description}
                   onChange={(e) =>
-                    setProjectForm((p) => ({
-                      ...p,
+                    setProjectForm((prev) => ({
+                      ...prev,
                       description: e.target.value,
                     }))
                   }
+                  style={{
+                    width: "100%",
+                    minHeight: "180px",
+                    resize: "vertical",
+                    lineHeight: 1.6,
+                    whiteSpace: "pre-wrap",
+                  }}
                 />
               </div>
 
@@ -1822,8 +3092,8 @@ export default function ProjectManagement() {
                       projectForm.end_date || undefined
                     }
                     onChange={(e) =>
-                      setProjectForm((p) => ({
-                        ...p,
+                      setProjectForm((prev) => ({
+                        ...prev,
                         start_date: e.target.value,
                       }))
                     }
@@ -1848,8 +3118,8 @@ export default function ProjectManagement() {
                     }
                     value={projectForm.end_date}
                     onChange={(e) =>
-                      setProjectForm((p) => ({
-                        ...p,
+                      setProjectForm((prev) => ({
+                        ...prev,
                         end_date: e.target.value,
                       }))
                     }
@@ -1897,7 +3167,7 @@ export default function ProjectManagement() {
         </div>
       )}
 
-      {/* MODAL TẠO VÀ CHỈNH SỬA TASK */}
+      {/* MODAL TẠO / CHỈNH SỬA TASK */}
       {isTaskModalOpen && (
         <div
           className="lop-phu-modal"
@@ -1931,6 +3201,7 @@ export default function ProjectManagement() {
             </div>
 
             <form onSubmit={handleSaveTask}>
+              {/* TÊN TASK */}
               <div className="nhom-form-group">
                 <label className="nhan-form">
                   Tên công việc / Task
@@ -1951,6 +3222,7 @@ export default function ProjectManagement() {
                 />
               </div>
 
+              {/* MÔ TẢ */}
               <div className="nhom-form-group">
                 <label className="nhan-form">
                   Mô tả chi tiết
@@ -1969,6 +3241,7 @@ export default function ProjectManagement() {
                 />
               </div>
 
+              {/* ĐỘ ƯU TIÊN VÀ NGƯỜI THỰC HIỆN */}
               <div className="luoi-hai-cot-modal">
                 <div className="nhom-form-group">
                   <label className="nhan-form">
@@ -2140,9 +3413,9 @@ export default function ProjectManagement() {
                     lineHeight: 1.5,
                   }}
                 >
-                  Nhập ba mức ước lượng thời gian cho Task.
-                  Đơn vị tính là ngày, tối đa 7 ngày.
-                  Các trường có thể để trống.
+                  Nhập ba mức ước lượng thời gian cho
+                  Task. Đơn vị tính là ngày, tối đa 7
+                  ngày. Các trường có thể để trống.
                 </p>
 
                 <div className="luoi-hai-cot-modal">
@@ -2243,8 +3516,8 @@ export default function ProjectManagement() {
                   }}
                 >
                   Điều kiện: Tốt nhất ≤ Trung bình ≤ Tệ
-                  nhất. Đây là thời gian dự kiến, không phải
-                  thời gian thực tế đã làm.
+                  nhất. Đây là thời gian dự kiến, không
+                  phải thời gian thực tế đã làm.
                 </small>
               </div>
 

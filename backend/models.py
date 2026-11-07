@@ -386,7 +386,13 @@ class TokenOut(BaseModel):
 
 class ProjectCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
-    description: str = Field(..., min_length=1, max_length=1000)
+
+    description: str = Field(
+        ...,
+        min_length=1,
+        description="Mô tả chi tiết dự án"
+    )
+
     start_date: date
     end_date: date
 
@@ -406,13 +412,37 @@ class ProjectCreate(BaseModel):
 
         return self
 
-
 class ProjectUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=255)
-    description: Optional[str] = Field(None, max_length=1000)
+
+    description: Optional[str] = Field(
+        None,
+        description="Mô tả chi tiết dự án"
+    )
+
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     status: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_project_update(self):
+        if self.name is not None:
+            self.name = self.name.strip()
+
+            if not self.name:
+                raise ValueError("Tên dự án không được để trống")
+
+        if self.description is not None:
+            self.description = self.description.strip()
+
+        if (
+            self.start_date is not None
+            and self.end_date is not None
+            and self.end_date < self.start_date
+        ):
+            raise ValueError("Ngày kết thúc không được trước ngày bắt đầu")
+
+        return self
 
 
 class ProjectJoinIn(BaseModel):
