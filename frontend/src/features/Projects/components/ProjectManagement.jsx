@@ -25,6 +25,7 @@ import {
   Users,
   Lock,
   DollarSign,
+  LayoutDashboard,
 } from "lucide-react";
 import "../ProjectManagement.css";
 
@@ -35,7 +36,7 @@ import CodeReview from "./CodeReview";
 import ProjectChat from "./ProjectChat";
 import GroupManagement from "./GroupManagement";
 import ProjectCostCalculator from "./ProjectCostCalculator";
-
+import ProjectDashboard from "./ProjectDashboard";
 async function sendAuthenticatedRequest(apiPath, options = {}) {
   const token = localStorage.getItem("access_token");
   if (!token) throw new Error("Người dùng chưa đăng nhập");
@@ -76,26 +77,26 @@ export default function ProjectManagement() {
 
   const [activeTab, setActiveTab] = useState("kanban");
   useEffect(() => {
-  const returnProjectId = location.state?.returnProjectId;
+    const returnProjectId = location.state?.returnProjectId;
 
-  if (!returnProjectId || projectList.length === 0) return;
+    if (!returnProjectId || projectList.length === 0) return;
 
-  const project = projectList.find(
-    (item) => String(item.id) === String(returnProjectId)
-  );
+    const project = projectList.find(
+      (item) => String(item.id) === String(returnProjectId),
+    );
 
-  if (project) {
-    setSelectedProject(project);
-    setActiveTab(location.state?.returnTab || "kanban");
+    if (project) {
+      setSelectedProject(project);
+      setActiveTab(location.state?.returnTab || "kanban");
 
-    navigate("/project", { replace: true, state: null });
-  }
-}, [location.state, projectList, navigate]);
+      navigate("/project", { replace: true, state: null });
+    }
+  }, [location.state, projectList, navigate]);
 
   // Nhóm và quyền lấy từ Backend; không sử dụng dữ liệu mẫu.
   const [groups, setGroups] = useState([]);
   const isProjectOwner = selectedProject?.role === "owner";
-  const isAnyGroupLeader = groups.some(g => g.leader_id === currentUser?.id);
+  const isAnyGroupLeader = groups.some((g) => g.leader_id === currentUser?.id);
   // Kanban dự án chỉ Owner có quyền sửa Task theo API backend/main.py.
   const canManageKanban = isProjectOwner;
 
@@ -144,9 +145,16 @@ export default function ProjectManagement() {
     if (!selectedProject?.id) return;
     let active = true;
     sendAuthenticatedRequest(`/projects/${selectedProject.id}/groups`)
-      .then(data => { if (active) setGroups(Array.isArray(data) ? data : []); })
-      .catch(error => { if (active) showNotification("loi", "Không tải được nhóm", error.message); });
-    return () => { active = false; };
+      .then((data) => {
+        if (active) setGroups(Array.isArray(data) ? data : []);
+      })
+      .catch((error) => {
+        if (active)
+          showNotification("loi", "Không tải được nhóm", error.message);
+      });
+    return () => {
+      active = false;
+    };
   }, [selectedProject?.id]);
 
   useEffect(() => {
@@ -162,8 +170,8 @@ export default function ProjectManagement() {
 
     setIsLoadingMembers(true);
     sendAuthenticatedRequest(`/projects/${projectId}/members`)
-      .then(data => setProjectMembers(Array.isArray(data) ? data : []))
-      .catch(error => {
+      .then((data) => setProjectMembers(Array.isArray(data) ? data : []))
+      .catch((error) => {
         setProjectMembers([]);
         showNotification("loi", "Không tải được thành viên", error.message);
       })
@@ -232,13 +240,28 @@ export default function ProjectManagement() {
 
   const markProjectComplete = async (project) => {
     if (project.role !== "owner" || project.status === "completed") return;
-    if (!window.confirm(`Đánh dấu dự án "${project.name}" đã hoàn thành? Dữ liệu và nhóm vẫn được giữ lại.`)) return;
+    if (
+      !window.confirm(
+        `Đánh dấu dự án "${project.name}" đã hoàn thành? Dữ liệu và nhóm vẫn được giữ lại.`,
+      )
+    )
+      return;
     try {
-      const updated = await sendAuthenticatedRequest(`/projects/${project.id}`, {
-        method: "PUT", body: JSON.stringify({ status: "completed" }),
-      });
-      setProjectList((prev) => prev.map((p) => p.id === updated.id ? updated : p));
-      showNotification("thanh-cong", "Hoàn thành dự án", `Đã kết thúc "${project.name}". Các nhóm chưa bị xóa.`);
+      const updated = await sendAuthenticatedRequest(
+        `/projects/${project.id}`,
+        {
+          method: "PUT",
+          body: JSON.stringify({ status: "completed" }),
+        },
+      );
+      setProjectList((prev) =>
+        prev.map((p) => (p.id === updated.id ? updated : p)),
+      );
+      showNotification(
+        "thanh-cong",
+        "Hoàn thành dự án",
+        `Đã kết thúc "${project.name}". Các nhóm chưa bị xóa.`,
+      );
     } catch (error) {
       showNotification("loi", "Không hoàn thành được dự án", error.message);
     }
@@ -248,32 +271,59 @@ export default function ProjectManagement() {
     e.preventDefault();
     const name = projectForm.name.trim();
     if (!name || !projectForm.start_date || !projectForm.end_date) {
-      showNotification("loi", "Thiếu thông tin", "Vui lòng nhập tên và thời gian dự án.");
+      showNotification(
+        "loi",
+        "Thiếu thông tin",
+        "Vui lòng nhập tên và thời gian dự án.",
+      );
       return;
     }
     if (projectForm.end_date < projectForm.start_date) {
-      showNotification("loi", "Ngày không hợp lệ", "Ngày kết thúc không được trước ngày bắt đầu.");
+      showNotification(
+        "loi",
+        "Ngày không hợp lệ",
+        "Ngày kết thúc không được trước ngày bắt đầu.",
+      );
       return;
     }
     if (isCreatingProject) return;
     setIsCreatingProject(true);
     try {
-      const newProject = await sendAuthenticatedRequest(editingProjectId ? `/projects/${editingProjectId}` : "/projects", {
-        method: editingProjectId ? "PUT" : "POST",
-        body: JSON.stringify({
-          name,
-          description: projectForm.description.trim() || null,
-          start_date: projectForm.start_date,
-          end_date: projectForm.end_date,
-        }),
-      });
-      setProjectList((prev) => editingProjectId ? prev.map((p) => p.id === newProject.id ? newProject : p) : [newProject, ...prev]);
+      const newProject = await sendAuthenticatedRequest(
+        editingProjectId ? `/projects/${editingProjectId}` : "/projects",
+        {
+          method: editingProjectId ? "PUT" : "POST",
+          body: JSON.stringify({
+            name,
+            description: projectForm.description.trim() || null,
+            start_date: projectForm.start_date,
+            end_date: projectForm.end_date,
+          }),
+        },
+      );
+      setProjectList((prev) =>
+        editingProjectId
+          ? prev.map((p) => (p.id === newProject.id ? newProject : p))
+          : [newProject, ...prev],
+      );
       setEditingProjectId(null);
-      setProjectForm({ name: "", description: "", start_date: "", end_date: "" });
+      setProjectForm({
+        name: "",
+        description: "",
+        start_date: "",
+        end_date: "",
+      });
       setIsProjectModalOpen(false);
-      showNotification("thanh-cong", "Thành công", `Đã lưu dự án "${newProject.name}"`);
+      showNotification(
+        "thanh-cong",
+        "Thành công",
+        `Đã lưu dự án "${newProject.name}"`,
+      );
     } catch (error) {
-      const message = typeof error.message === "string" ? error.message : "Không thể tạo dự án";
+      const message =
+        typeof error.message === "string"
+          ? error.message
+          : "Không thể tạo dự án";
       showNotification("loi", "Không tạo được dự án", message);
     } finally {
       setIsCreatingProject(false);
@@ -361,15 +411,19 @@ export default function ProjectManagement() {
     if (!selectedProject?.id || !isProjectOwner) return {};
     setLoadingTaskGroups(true);
     try {
-      const boards = await Promise.all(groups.map(async (group) => ({
-        groupId: group.id,
-        board: await sendAuthenticatedRequest(
-          `/projects/${selectedProject.id}/groups/${group.id}/kanban`
-        ),
-      })));
+      const boards = await Promise.all(
+        groups.map(async (group) => ({
+          groupId: group.id,
+          board: await sendAuthenticatedRequest(
+            `/projects/${selectedProject.id}/groups/${group.id}/kanban`,
+          ),
+        })),
+      );
       const assignments = {};
       boards.forEach(({ groupId, board }) => {
-        (board?.tasks || []).forEach((task) => { assignments[task.id] = groupId; });
+        (board?.tasks || []).forEach((task) => {
+          assignments[task.id] = groupId;
+        });
       });
       setTaskGroupAssignments(assignments);
       return assignments;
@@ -378,14 +432,18 @@ export default function ProjectManagement() {
     }
   };
 
-  const saveTaskGroupAssignment = async (taskId, previousGroupId, nextGroupId) => {
+  const saveTaskGroupAssignment = async (
+    taskId,
+    previousGroupId,
+    nextGroupId,
+  ) => {
     if (previousGroupId === nextGroupId) return;
     const base = `/projects/${selectedProject.id}/groups`;
     if (previousGroupId) {
       // Backend từ chối gỡ Task nếu đã có Subtask, nhằm bảo vệ dữ liệu.
       await sendAuthenticatedRequest(
         `${base}/${previousGroupId}/kanban/tasks/${taskId}`,
-        { method: "DELETE" }
+        { method: "DELETE" },
       );
     }
     if (nextGroupId) {
@@ -472,11 +530,15 @@ export default function ProjectManagement() {
       try {
         await saveTaskGroupAssignment(
           savedTaskId,
-          editingTaskId ? (taskGroupAssignments[editingTaskId] || "") : "",
-          taskGroupId
+          editingTaskId ? taskGroupAssignments[editingTaskId] || "" : "",
+          taskGroupId,
         );
       } catch (assignmentError) {
-        showNotification("loi", "Không lưu được nhóm phụ trách", assignmentError.message);
+        showNotification(
+          "loi",
+          "Không lưu được nhóm phụ trách",
+          assignmentError.message,
+        );
         await loadTaskGroupAssignments().catch(() => {});
         // Task đã lưu, giữ form mở để người dùng xử lý việc phân nhóm.
         return;
@@ -510,7 +572,9 @@ export default function ProjectManagement() {
     setTaskGroupId(taskGroupAssignments[task.id] || "");
     loadTaskGroupAssignments()
       .then((assignments) => setTaskGroupId(assignments[task.id] || ""))
-      .catch((error) => showNotification("loi", "Không tải được nhóm phụ trách", error.message));
+      .catch((error) =>
+        showNotification("loi", "Không tải được nhóm phụ trách", error.message),
+      );
     setCurrentTaskColumn(task.status);
     setTaskForm({
       title: task.title || "",
@@ -534,7 +598,7 @@ export default function ProjectManagement() {
     setEditingTaskId(null);
     setTaskGroupId("");
     loadTaskGroupAssignments().catch((error) =>
-      showNotification("loi", "Không tải được nhóm phụ trách", error.message)
+      showNotification("loi", "Không tải được nhóm phụ trách", error.message),
     );
     setCurrentTaskColumn(columnKey);
     setTaskForm({
@@ -677,6 +741,24 @@ export default function ProjectManagement() {
             }}
           >
             <button
+              onClick={() => setActiveTab("dashboard")}
+              style={{
+                background: activeTab === "dashboard" ? "#4f46e5" : "#1e293b",
+                color: "#fff",
+                border: "1px solid #334155",
+                padding: "8px 16px",
+                borderRadius: "8px",
+                fontSize: "13px",
+                fontWeight: 600,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              <LayoutDashboard size={15} /> Dashboard
+            </button>
+            <button
               onClick={() => setActiveTab("kanban")}
               style={{
                 background: activeTab === "kanban" ? "#4f46e5" : "#1e293b",
@@ -767,7 +849,13 @@ export default function ProjectManagement() {
               <DollarSign size={15} /> Tính chi phí dự án
             </button>
           </div>
-
+          {activeTab === "dashboard" && (
+            <ProjectDashboard
+              projectList={projectList}
+              projectTasks={projectTasks}
+              groups={groups}
+            />
+          )}
           {/* 1. BẢNG KANBAN */}
           {activeTab === "kanban" && (
             <>
@@ -787,8 +875,7 @@ export default function ProjectManagement() {
                   }}
                 >
                   <Lock size={16} /> Bạn đang truy cập dưới quyền Thành viên.
-                  Chỉ Chủ dự án mới có quyền Thêm / Sửa / Xóa
-                  công việc.
+                  Chỉ Chủ dự án mới có quyền Thêm / Sửa / Xóa công việc.
                 </div>
               )}
 
@@ -1093,57 +1180,129 @@ export default function ProjectManagement() {
 
       {/* Modal tạo dự án */}
       {isProjectModalOpen && (
-        <div className="lop-phu-modal" onClick={() => !isCreatingProject && setIsProjectModalOpen(false)}>
+        <div
+          className="lop-phu-modal"
+          onClick={() => !isCreatingProject && setIsProjectModalOpen(false)}
+        >
           <div className="noi-dung-modal" onClick={(e) => e.stopPropagation()}>
             <div className="header-modal">
-              <h4 className="tieu-de-modal">{editingProjectId ? "Chỉnh Sửa Dự Án" : "Tạo Dự Án Mới"}</h4>
-              <button type="button" className="nut-dong-modal"
-                disabled={isCreatingProject} onClick={() => setIsProjectModalOpen(false)}
-                aria-label="Đóng form tạo dự án">
+              <h4 className="tieu-de-modal">
+                {editingProjectId ? "Chỉnh Sửa Dự Án" : "Tạo Dự Án Mới"}
+              </h4>
+              <button
+                type="button"
+                className="nut-dong-modal"
+                disabled={isCreatingProject}
+                onClick={() => setIsProjectModalOpen(false)}
+                aria-label="Đóng form tạo dự án"
+              >
                 <X size={18} />
               </button>
             </div>
             <form onSubmit={handleCreateProject}>
               <div className="nhom-form-group">
-                <label className="nhan-form" htmlFor="project-name">Tên dự án *</label>
-                <input id="project-name" className="input-form" type="text"
-                  maxLength={255} required autoFocus
+                <label className="nhan-form" htmlFor="project-name">
+                  Tên dự án *
+                </label>
+                <input
+                  id="project-name"
+                  className="input-form"
+                  type="text"
+                  maxLength={255}
+                  required
+                  autoFocus
                   placeholder="VD: Website Quản Lý Công Việc CNTT"
                   value={projectForm.name}
-                  onChange={(e) => setProjectForm((p) => ({ ...p, name: e.target.value }))} />
+                  onChange={(e) =>
+                    setProjectForm((p) => ({ ...p, name: e.target.value }))
+                  }
+                />
               </div>
               <div className="nhom-form-group">
-                <label className="nhan-form" htmlFor="project-description">Mô tả ngắn</label>
-                <textarea id="project-description" className="textarea-form"
-                  rows={3} maxLength={1000}
+                <label className="nhan-form" htmlFor="project-description">
+                  Mô tả ngắn
+                </label>
+                <textarea
+                  id="project-description"
+                  className="textarea-form"
+                  rows={3}
+                  maxLength={1000}
                   placeholder="Mục tiêu và nội dung chính của dự án..."
                   value={projectForm.description}
-                  onChange={(e) => setProjectForm((p) => ({ ...p, description: e.target.value }))} />
+                  onChange={(e) =>
+                    setProjectForm((p) => ({
+                      ...p,
+                      description: e.target.value,
+                    }))
+                  }
+                />
               </div>
               <div className="luoi-hai-cot-modal">
                 <div className="nhom-form-group">
-                  <label className="nhan-form" htmlFor="project-start">Ngày bắt đầu *</label>
-                  <input id="project-start" type="date" className="input-form"
-                    required value={projectForm.start_date}
+                  <label className="nhan-form" htmlFor="project-start">
+                    Ngày bắt đầu *
+                  </label>
+                  <input
+                    id="project-start"
+                    type="date"
+                    className="input-form"
+                    required
+                    value={projectForm.start_date}
                     max={projectForm.end_date || undefined}
-                    onChange={(e) => setProjectForm((p) => ({ ...p, start_date: e.target.value }))} />
+                    onChange={(e) =>
+                      setProjectForm((p) => ({
+                        ...p,
+                        start_date: e.target.value,
+                      }))
+                    }
+                  />
                 </div>
                 <div className="nhom-form-group">
-                  <label className="nhan-form" htmlFor="project-end">Ngày kết thúc *</label>
-                  <input id="project-end" type="date" className="input-form"
-                    required min={projectForm.start_date || undefined}
+                  <label className="nhan-form" htmlFor="project-end">
+                    Ngày kết thúc *
+                  </label>
+                  <input
+                    id="project-end"
+                    type="date"
+                    className="input-form"
+                    required
+                    min={projectForm.start_date || undefined}
                     value={projectForm.end_date}
-                    onChange={(e) => setProjectForm((p) => ({ ...p, end_date: e.target.value }))} />
+                    onChange={(e) =>
+                      setProjectForm((p) => ({
+                        ...p,
+                        end_date: e.target.value,
+                      }))
+                    }
+                  />
                 </div>
               </div>
               <div className="chan-modal">
-                <button type="button" className="nut-hanh-dong-the xem"
-                  disabled={isCreatingProject} onClick={() => setIsProjectModalOpen(false)}>
+                <button
+                  type="button"
+                  className="nut-hanh-dong-the xem"
+                  disabled={isCreatingProject}
+                  onClick={() => setIsProjectModalOpen(false)}
+                >
                   Hủy
                 </button>
-                <button type="submit" className="nut-chinh" disabled={isCreatingProject}>
-                  {isCreatingProject ? <Loader2 size={16} className="icon-quay" /> : <FolderPlus size={16} />}
-                  <span>{isCreatingProject ? "Đang lưu..." : editingProjectId ? "Lưu Thay Đổi" : "Tạo Dự Án"}</span>
+                <button
+                  type="submit"
+                  className="nut-chinh"
+                  disabled={isCreatingProject}
+                >
+                  {isCreatingProject ? (
+                    <Loader2 size={16} className="icon-quay" />
+                  ) : (
+                    <FolderPlus size={16} />
+                  )}
+                  <span>
+                    {isCreatingProject
+                      ? "Đang lưu..."
+                      : editingProjectId
+                        ? "Lưu Thay Đổi"
+                        : "Tạo Dự Án"}
+                  </span>
                 </button>
               </div>
             </form>
@@ -1247,11 +1406,14 @@ export default function ProjectManagement() {
                   <option value="">-- Chưa giao cho nhóm --</option>
                   {groups.map((group) => (
                     <option key={group.id} value={group.id}>
-                      {group.name}{group.leader ? ` — Leader: ${group.leader}` : ""}
+                      {group.name}
+                      {group.leader ? ` — Leader: ${group.leader}` : ""}
                     </option>
                   ))}
                 </select>
-                <small style={{ color: "#94a3b8", display: "block", marginTop: 6 }}>
+                <small
+                  style={{ color: "#94a3b8", display: "block", marginTop: 6 }}
+                >
                   {loadingTaskGroups
                     ? "Đang kiểm tra phân công hiện tại..."
                     : "Chỉ Owner được phân công. Task sẽ xuất hiện trong Kanban của nhóm đã chọn."}
@@ -1276,8 +1438,16 @@ export default function ProjectManagement() {
                 >
                   Hủy
                 </button>
-                <button type="submit" className="nut-chinh" disabled={savingTask || loadingTaskGroups}>
-                  {savingTask ? "Đang lưu..." : editingTaskId ? "Lưu Thay Đổi" : "Tạo Task ngay"}
+                <button
+                  type="submit"
+                  className="nut-chinh"
+                  disabled={savingTask || loadingTaskGroups}
+                >
+                  {savingTask
+                    ? "Đang lưu..."
+                    : editingTaskId
+                      ? "Lưu Thay Đổi"
+                      : "Tạo Task ngay"}
                 </button>
               </div>
             </form>

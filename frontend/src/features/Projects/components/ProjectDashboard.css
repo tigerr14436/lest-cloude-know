@@ -1,0 +1,332 @@
+.dashboard-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding-bottom: 30px;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  background-color: #1e293b;
+  border: 1px solid #334155;
+  padding: 20px;
+  border-radius: 16px;
+}
+
+.dashboard-title {
+  color: #f8fafc;
+  font-size: 20px;
+  font-weight: 700;
+  margin: 0 0 4px 0;
+}
+
+.dashboard-subtitle {
+  color: #94a3b8;
+  font-size: 13px;
+  margin: 0;
+}
+
+.dashboard-timestamp {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background-color: #0f172a;
+  color: #38bdf8;
+  border: 1px solid #334155;
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* METRIC CARDS */
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.metric-card {
+  background-color: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 16px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.metric-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.metric-title {
+  color: #94a3b8;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.metric-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.metric-icon.indigo { background: rgba(99, 102, 241, 0.15); color: #818cf8; }
+.metric-icon.emerald { background: rgba(52, 211, 153, 0.15); color: #34d399; }
+.metric-icon.amber { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
+.metric-icon.sky { background: rgba(56, 189, 248, 0.15); color: #38bdf8; }
+
+.metric-value {
+  color: #f8fafc;
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.metric-subtext {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.metric-subtext.green { color: #34d399; }
+.metric-subtext.text-amber { color: #fbbf24; }
+.metric-subtext.text-sky { color: #38bdf8; }
+
+.progress-bar-mini {
+  width: 100%;
+  height: 6px;
+  background-color: #0f172a;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-fill-mini {
+  height: 100%;
+  background: linear-gradient(90deg, #10b981 0%, #059669 100%);
+}
+
+/* TWO COLUMN LAYOUT */
+.dashboard-two-column-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 20px;
+}
+
+.dashboard-content-box {
+  background-color: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 16px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.content-box-title {
+  color: #f8fafc;
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.icon-emerald { color: #34d399; }
+.icon-sky { color: #38bdf8; }
+.icon-indigo { color: #818cf8; }
+.icon-amber { color: #fbbf24; }
+
+/* STATUS DISTRIBUTION */
+.status-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.status-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: #0f172a;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  font-size: 13px;
+  color: #f8fafc;
+}
+
+.status-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dot-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.dot-indicator.emerald { background-color: #34d399; }
+.dot-indicator.amber { background-color: #fbbf24; }
+.dot-indicator.slate { background-color: #94a3b8; }
+
+.status-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.status-badge.emerald { background: rgba(52, 211, 153, 0.1); color: #34d399; }
+.status-badge.amber { background: rgba(245, 158, 11, 0.1); color: #fbbf24; }
+.status-badge.slate { background: rgba(148, 163, 184, 0.1); color: #94a3b8; }
+
+.overall-progress-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid #334155;
+  padding-top: 14px;
+}
+
+.progress-info {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+.progress-bar-large {
+  width: 100%;
+  height: 10px;
+  background-color: #0f172a;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.progress-fill-large {
+  height: 100%;
+  background: linear-gradient(90deg, #6366f1 0%, #38bdf8 100%);
+}
+
+/* BUDGET DETAILS */
+.budget-details-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.budget-card {
+  background-color: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.budget-label { font-size: 11px; color: #94a3b8; }
+.budget-value { font-size: 14px; font-weight: 700; }
+.budget-value.green { color: #34d399; }
+.budget-value.text-white { color: #f8fafc; }
+
+.risk-warning-box {
+  display: flex;
+  gap: 12px;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  padding: 12px 16px;
+  border-radius: 12px;
+  color: #fbbf24;
+}
+
+.warning-icon { flex-shrink: 0; margin-top: 2px; }
+.warning-title { font-size: 13px; font-weight: 700; margin: 0 0 4px 0; }
+.warning-description { font-size: 12px; margin: 0; line-height: 1.4; color: #fef08a; }
+
+/* TEAMS & PRIORITY TASKS */
+.team-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.team-card-mini {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background-color: #0f172a;
+  border: 1px solid #334155;
+  padding: 8px 12px;
+  border-radius: 8px;
+}
+
+.team-avatar {
+  width: 30px;
+  height: 30px;
+  background-color: #38bdf8;
+  color: #0f172a;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 13px;
+}
+
+.team-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.team-name { color: #f8fafc; font-size: 13px; font-weight: 600; }
+.team-leader { color: #94a3b8; font-size: 11px; }
+
+.priority-task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.priority-task-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: #0f172a;
+  border: 1px solid #334155;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.task-title { color: #f8fafc; font-weight: 500; }
+.high-priority-tag {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.empty-text {
+  color: #64748b;
+  font-size: 12px;
+  font-style: italic;
+  margin: 0;
+}
