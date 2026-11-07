@@ -1603,17 +1603,22 @@ def parse_github_repository_url(
     return owner, repo
 
 
-def _github_request_sync(
-    api_path: str
-):
+def _github_request_sync(api_path: str):
+
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "DevTask-Project-Manager",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    token = os.getenv("GITHUB_TOKEN", "").strip()
+
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
 
     request = Request(
         f"https://api.github.com{api_path}",
-        headers={
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "DevTask-Project-Manager",
-            "X-GitHub-Api-Version": "2022-11-28",
-        },
+        headers=headers,
     )
 
     try:

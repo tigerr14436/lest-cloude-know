@@ -7,6 +7,7 @@ import ProjectManagement from '../features/Projects/components/ProjectManagement
 import TaskDetailPage from '../features/Projects/components/TaskDetailPage';
 import ProfilePage from '../features/Profile/components/ProfilePage';
 
+
 export default function AppRoutes() {
   const [isAuthenticated, setIsAuthenticated] = useState(() =>
     Boolean(localStorage.getItem('access_token'))

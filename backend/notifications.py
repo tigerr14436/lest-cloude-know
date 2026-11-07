@@ -1,4 +1,3 @@
-
 """
 API thông báo cá nhân và lời mời tham gia dự án/nhóm DevTask.
 
@@ -10,7 +9,8 @@ Các loại thông báo:
 
 Lời mời dự án:
 - Chỉ chủ dự án được gửi lời mời.
-- Người được mời được xác định bằng Name Tag.
+- Người được mời được xác định bằng Name Tag hoặc email.
+- Chỉ được nhập một trong hai thông tin.
 - Chấp nhận: thêm vào project_members với role="member".
 - Không tự động cấp quyền Leader.
 - Từ chối: không thêm vào dự án.
@@ -173,7 +173,6 @@ class ProjectInvitation(Base):
     """
     Lời mời tham gia dự án.
 
-    Khác GroupInvitation:
     - Không gắn với group_id.
     - Chấp nhận chỉ thêm vào dự án.
     - Vai trò mặc định luôn là member.
@@ -242,7 +241,9 @@ class InvitationResponse(BaseModel):
 
 class GroupInvitationCreate(BaseModel):
     project_id: uuid.UUID
+
     group_id: uuid.UUID
+
     name_tag: str = Field(
         min_length=4,
         max_length=5,
@@ -251,9 +252,17 @@ class GroupInvitationCreate(BaseModel):
 
 class ProjectInvitationCreate(BaseModel):
     project_id: uuid.UUID
-    name_tag: str = Field(
+
+    name_tag: Optional[str] = Field(
+        default=None,
         min_length=4,
         max_length=5,
+    )
+
+    email: Optional[str] = Field(
+        default=None,
+        min_length=5,
+        max_length=255,
     )
 
 
@@ -290,6 +299,7 @@ async def find_user_by_name_tag(
     db: AsyncSession,
     name_tag: str,
 ) -> User:
+
     result = await db.execute(
         select(User).where(
             User.name_tag == name_tag
@@ -302,6 +312,33 @@ async def find_user_by_name_tag(
         raise HTTPException(
             status_code=404,
             detail="Không tìm thấy tài khoản với Name Tag này",
+        )
+
+    return user
+
+
+async def find_user_by_email(
+    db: AsyncSession,
+    email: str,
+) -> User:
+    """
+    Tìm tài khoản bằng email không phân biệt chữ hoa/chữ thường.
+    """
+
+    normalized_email = email.strip().lower()
+
+    result = await db.execute(
+        select(User).where(
+            func.lower(User.email) == normalized_email
+        )
+    )
+
+    user = result.scalar_one_or_none()
+
+    if user is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Không tìm thấy tài khoản với email này",
         )
 
     return user
@@ -380,6 +417,7 @@ async def list_notifications(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+
     result = await db.execute(
         select(Notification)
         .where(
@@ -412,7 +450,8 @@ async def list_notifications(
 
 
 # ============================================================
-# CREATE PROJECT INVITATION BY NAME TAG
+# CREATE PROJECT INVITATION
+# BY NAME TAG OR EMAIL
 # ============================================================
 
 @router.post(
@@ -425,7 +464,13 @@ async def create_project_invitation(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Chỉ chủ dự án được gửi lời mời tham gia dự án.
+    Chỉ chủ dự án được gửi lời mời.
+
+    Hỗ trợ:
+    - Name Tag.
+    - Email.
+
+    Chỉ được nhập một trong hai.
     """
 
     project = await db.get(
@@ -439,20 +484,53 @@ async def create_project_invitation(
             detail="Không tìm thấy dự án",
         )
 
-    # Kiểm tra quyền chủ dự án.
+    # Chỉ Owner mới được mời thành viên.
     if project.owner_id != current_user.id:
         raise HTTPException(
             status_code=403,
             detail="Chỉ chủ dự án mới được mời thành viên vào dự án",
         )
 
-    name_tag = normalize_name_tag(payload.name_tag)
-
-    invitee = await find_user_by_name_tag(
-        db,
-        name_tag,
+    # Kiểm tra thông tin đầu vào.
+    has_name_tag = bool(
+        payload.name_tag
+        and payload.name_tag.strip()
     )
 
+    has_email = bool(
+        payload.email
+        and payload.email.strip()
+    )
+
+    if has_name_tag == has_email:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Vui lòng nhập Name Tag hoặc email, "
+                "không được bỏ trống hoặc nhập cả hai"
+            ),
+        )
+
+    # Tìm tài khoản.
+    if has_name_tag:
+
+        name_tag = normalize_name_tag(
+            payload.name_tag
+        )
+
+        invitee = await find_user_by_name_tag(
+            db,
+            name_tag,
+        )
+
+    else:
+
+        invitee = await find_user_by_email(
+            db,
+            payload.email,
+        )
+
+    # Không cho phép tự mời chính mình.
     if invitee.id == current_user.id:
         raise HTTPException(
             status_code=400,
@@ -472,7 +550,7 @@ async def create_project_invitation(
             detail="Người dùng đã là thành viên của dự án",
         )
 
-    # Kiểm tra lời mời đang chờ để tránh gửi trùng.
+    # Kiểm tra lời mời đang chờ.
     pending_result = await db.execute(
         select(ProjectInvitation).where(
             ProjectInvitation.project_id == project.id,
@@ -486,7 +564,10 @@ async def create_project_invitation(
     if pending is not None:
         raise HTTPException(
             status_code=409,
-            detail="Người dùng đã có lời mời tham gia dự án đang chờ xử lý",
+            detail=(
+                "Người dùng đã có lời mời tham gia "
+                "dự án đang chờ xử lý"
+            ),
         )
 
     invitation = ProjectInvitation(
@@ -534,6 +615,7 @@ async def create_project_invitation(
             "id": str(invitee.id),
             "name": invitee.name,
             "name_tag": invitee.name_tag,
+            "email": invitee.email,
         },
     }
 
@@ -552,7 +634,7 @@ async def respond_to_project_invitation(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Chỉ tài khoản được mời mới có quyền xử lý lời mời.
+    Chỉ tài khoản được mời mới có quyền xử lý.
 
     Chấp nhận:
     - Thêm ProjectMember.
@@ -606,6 +688,7 @@ async def respond_to_project_invitation(
         )
 
         if existing_member is None:
+
             db.add(
                 ProjectMember(
                     project_id=invitation.project_id,
@@ -617,12 +700,16 @@ async def respond_to_project_invitation(
         invitation.status = "accepted"
 
     else:
+
         invitation.status = "rejected"
 
-    invitation.responded_at = datetime.now(timezone.utc)
+    invitation.responded_at = datetime.now(
+        timezone.utc
+    )
 
     # Đánh dấu thông báo tương ứng đã đọc.
     if invitation.notification_id:
+
         notification = await db.get(
             Notification,
             invitation.notification_id,
@@ -666,13 +753,16 @@ async def create_group_invitation(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+
     from project_groups import (
         GroupMember,
         get_group,
         require_group_manager,
     )
 
-    name_tag = normalize_name_tag(payload.name_tag)
+    name_tag = normalize_name_tag(
+        payload.name_tag
+    )
 
     group = await get_group(
         db,
@@ -805,6 +895,7 @@ async def list_group_invitations(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+
     from project_groups import (
         get_group,
         require_group_manager,
@@ -870,6 +961,7 @@ async def mark_notification_read(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+
     item = await db.get(
         Notification,
         notification_id,
@@ -903,6 +995,7 @@ async def mark_all_notifications_read(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+
     result = await db.execute(
         select(Notification).where(
             Notification.recipient_id == current_user.id,
@@ -933,6 +1026,7 @@ async def delete_notification(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+
     item = await db.get(
         Notification,
         notification_id,
@@ -959,19 +1053,22 @@ async def delete_notification(
 # ACCEPT / REJECT GROUP INVITATION
 # ============================================================
 
-@router.post("/invitations/{invitation_id}/respond")
+@router.post(
+    "/invitations/{invitation_id}/respond"
+)
 async def respond_to_group_invitation(
     invitation_id: uuid.UUID,
     payload: InvitationResponse,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+
     from project_groups import (
         ProjectGroup,
         GroupMember,
     )
 
-    # Khóa bản ghi để tránh hai yêu cầu xử lý cùng một lời mời.
+    # Khóa bản ghi để tránh xử lý cùng lời mời hai lần.
     result = await db.execute(
         select(GroupInvitation)
         .where(
@@ -1024,7 +1121,7 @@ async def respond_to_group_invitation(
 
     if payload.action == "accept":
 
-        # Bước 1: thêm vào dự án nếu chưa phải thành viên.
+        # Bước 1: thêm vào dự án nếu chưa là thành viên.
         project_member = await is_project_member(
             db,
             invitation.project_id,
@@ -1032,6 +1129,7 @@ async def respond_to_group_invitation(
         )
 
         if project_member is None:
+
             db.add(
                 ProjectMember(
                     project_id=invitation.project_id,
@@ -1044,7 +1142,7 @@ async def respond_to_group_invitation(
                 )
             )
 
-        # Bước 2: thêm vào nhóm nếu chưa phải thành viên.
+        # Bước 2: thêm vào nhóm nếu chưa là thành viên.
         group_member = (
             await db.execute(
                 select(GroupMember).where(
@@ -1055,6 +1153,7 @@ async def respond_to_group_invitation(
         ).scalar_one_or_none()
 
         if group_member is None:
+
             db.add(
                 GroupMember(
                     group_id=invitation.group_id,
@@ -1065,12 +1164,16 @@ async def respond_to_group_invitation(
         invitation.status = "accepted"
 
     else:
+
         invitation.status = "rejected"
 
-    invitation.responded_at = datetime.now(timezone.utc)
+    invitation.responded_at = datetime.now(
+        timezone.utc
+    )
 
     # Đánh dấu thông báo lời mời đã đọc.
     if invitation.notification_id:
+
         notification = await db.get(
             Notification,
             invitation.notification_id,

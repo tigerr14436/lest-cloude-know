@@ -12,6 +12,10 @@ import {
   Check,
   Loader2,
   AlertCircle,
+  ClipboardList,
+  ListChecks,
+  Folder,
+  Users,
 } from 'lucide-react';
 
 const API_BASE = 'http://127.0.0.1:8000/api';
@@ -63,6 +67,58 @@ const formatNotificationTime = (value) => {
   });
 };
 
+// Xác định loại thông báo.
+const getNotificationType = (notification) => {
+  return notification?.type || notification?.notification_type || '';
+};
+
+// Xác định đây có phải lời mời tham gia dự án/nhóm không.
+const isInvitationNotification = (notification) => {
+  const type = getNotificationType(notification);
+
+  return (
+    type === 'group_invitation' ||
+    type === 'project_invitation'
+  );
+};
+
+// Lấy biểu tượng theo loại thông báo.
+const getNotificationIcon = (notification) => {
+  const type = getNotificationType(notification);
+
+  switch (type) {
+    case 'task_assigned':
+      return <ClipboardList size={19} />;
+
+    case 'subtask_assigned':
+      return <ListChecks size={19} />;
+
+    case 'project_invitation':
+      return <Folder size={19} />;
+
+    case 'group_invitation':
+      return <Users size={19} />;
+
+    default:
+      return <Bell size={19} />;
+  }
+};
+
+// Lấy API xử lý lời mời tương ứng.
+const getInvitationEndpoint = (notification, invitationId) => {
+  const type = getNotificationType(notification);
+
+  if (type === 'project_invitation') {
+    return `/notifications/project-invitations/${invitationId}/respond`;
+  }
+
+  if (type === 'group_invitation') {
+    return `/notifications/invitations/${invitationId}/respond`;
+  }
+
+  return null;
+};
+
 // ============================================================
 // COMPONENT
 // ============================================================
@@ -95,7 +151,7 @@ export default function Header({
     const token = getToken();
 
     if (!token) {
-      throw new Error('Phiên đăng nhập đã hết hạn.');
+      throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
     }
 
     const response = await fetch(`${API_BASE}${endpoint}`, {
@@ -107,19 +163,21 @@ export default function Header({
       },
     });
 
-    if (response.status === 401) {
-      throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
-    }
-
     let result = null;
 
     if (response.status !== 204) {
       result = await response.json().catch(() => null);
     }
 
+    if (response.status === 401) {
+      throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+    }
+
     if (!response.ok) {
       throw new Error(
-        result?.detail || 'Không thể thực hiện thao tác.'
+        result?.detail ||
+        result?.message ||
+        'Không thể thực hiện thao tác.'
       );
     }
 
@@ -199,18 +257,18 @@ export default function Header({
     }
   }, [isAuthenticated, apiRequest]);
 
-  // Tải thông báo khi đăng nhập.
+  // Tải thông báo khi đăng nhập và tự cập nhật mỗi 30 giây.
   useEffect(() => {
     if (!isAuthenticated) {
       setNotifications([]);
       setUnreadCount(0);
       setShowNotifications(false);
+      setNotificationError('');
       return;
     }
 
     loadNotifications(true);
 
-    // Tự động cập nhật thông báo mỗi 30 giây.
     const interval = setInterval(() => {
       loadNotifications(false);
     }, 30000);
@@ -218,7 +276,10 @@ export default function Header({
     return () => clearInterval(interval);
   }, [isAuthenticated, loadNotifications]);
 
-  // Khi mở bảng thông báo, tải lại dữ liệu mới nhất.
+  // ==========================================================
+  // TOGGLE NOTIFICATIONS
+  // ==========================================================
+
   const handleToggleNotifications = () => {
     const nextState = !showNotifications;
 
@@ -236,7 +297,6 @@ export default function Header({
   const markAsRead = async (notification) => {
     if (notification.is_read) return;
 
-    // Cập nhật giao diện trước để phản hồi nhanh.
     setNotifications((prev) =>
       prev.map((item) =>
         item.id === notification.id
@@ -254,7 +314,7 @@ export default function Header({
       );
     } catch (error) {
       console.error('Lỗi đánh dấu thông báo:', error);
-      loadNotifications(false);
+      await loadNotifications(false);
     }
   };
 
@@ -276,6 +336,7 @@ export default function Header({
       );
 
       setUnreadCount(0);
+      setNotificationError('');
     } catch (error) {
       console.error('Lỗi đánh dấu tất cả thông báo:', error);
       setNotificationError(error.message);
@@ -311,13 +372,13 @@ export default function Header({
       console.error('Lỗi xóa thông báo:', error);
 
       setNotifications(previousNotifications);
-      loadNotifications(false);
+      await loadNotifications(false);
       setNotificationError(error.message);
     }
   };
 
   // ==========================================================
-  // RESPOND TO GROUP INVITATION
+  // RESPOND TO PROJECT / GROUP INVITATION
   // ==========================================================
 
   const handleInvitationResponse = async (
@@ -338,19 +399,43 @@ export default function Header({
       return;
     }
 
+    const endpoint = getInvitationEndpoint(
+      notification,
+      invitationId
+    );
+
+    if (!endpoint) {
+      setNotificationError(
+        'Loại lời mời không được hỗ trợ.'
+      );
+      return;
+    }
+
     setProcessingInvitation(notification.id);
     setNotificationError('');
 
     try {
-      await apiRequest(
-        `/notifications/invitations/${invitationId}/respond`,
-        {
-          method: 'POST',
-          body: JSON.stringify({ action }),
-        }
-      );
+      const result = await apiRequest(endpoint, {
+        method: 'POST',
+        body: JSON.stringify({ action }),
+      });
 
+      // Tải lại danh sách để cập nhật trạng thái thông báo.
       await loadNotifications(false);
+
+      if (action === 'accept') {
+        setNotificationError('');
+
+        // Lời mời nhóm và dự án đều trả về project_id.
+        const projectId =
+          result?.project_id ||
+          notification.data?.project_id;
+
+        if (projectId) {
+          setShowNotifications(false);
+          navigate(`/du-an/${projectId}`);
+        }
+      }
     } catch (error) {
       console.error('Lỗi xử lý lời mời:', error);
       setNotificationError(error.message);
@@ -372,7 +457,6 @@ export default function Header({
     setShowNotifications(false);
 
     if (projectId) {
-      // Chuyển đến trang chi tiết dự án.
       navigate(`/du-an/${projectId}`);
     } else {
       navigate('/du-an');
@@ -409,7 +493,7 @@ export default function Header({
     };
   }, []);
 
-  // Đồng bộ khi hồ sơ thay đổi từ tab khác.
+  // Đồng bộ hồ sơ khi thay đổi từ tab khác.
   useEffect(() => {
     const handleStorageChange = (event) => {
       if (event.key?.startsWith(`${CV_KEY}:`)) {
@@ -442,6 +526,7 @@ export default function Header({
     setNotifications([]);
     setUnreadCount(0);
     setShowNotifications(false);
+    setNotificationError('');
 
     if (typeof onLogout === 'function') {
       onLogout();
@@ -549,24 +634,34 @@ export default function Header({
 
                     {loadingNotifications ? (
                       <div className="notification-loading">
-                        <Loader2 size={20} className="notification-spinner" />
+                        <Loader2
+                          size={20}
+                          className="notification-spinner"
+                        />
                         <span>Đang tải thông báo...</span>
                       </div>
                     ) : notifications.length > 0 ? (
 
                       notifications.map((item) => {
+                        const type = getNotificationType(item);
+
                         const isInvitation =
-                          item.type === 'group_invitation';
+                          isInvitationNotification(item);
 
                         const isProcessing =
                           processingInvitation === item.id;
+
+                        const isPendingInvitation =
+                          isInvitation &&
+                          item.data?.invitation_id &&
+                          !item.is_read;
 
                         return (
                           <div
                             key={item.id}
                             className={`notification-item ${
                               !item.is_read ? 'unread' : ''
-                            }`}
+                            } ${isInvitation ? 'invitation-notification' : ''}`}
                             onClick={() =>
                               handleNotificationClick(item)
                             }
@@ -574,13 +669,18 @@ export default function Header({
                             tabIndex={0}
                             onKeyDown={(event) => {
                               if (
-                                event.key === 'Enter' &&
-                                !isInvitation
+                                event.key === 'Enter' ||
+                                event.key === ' '
                               ) {
+                                event.preventDefault();
                                 handleNotificationClick(item);
                               }
                             }}
                           >
+                            <div className="notification-type-icon">
+                              {getNotificationIcon(item)}
+                            </div>
+
                             <div className="notification-content">
                               <h5>{item.title}</h5>
 
@@ -590,7 +690,8 @@ export default function Header({
                                 {formatNotificationTime(item.created_at)}
                               </span>
 
-                              {isInvitation && (
+                              {/* NÚT XỬ LÝ LỜI MỜI */}
+                              {isPendingInvitation && (
                                 <div className="invitation-actions">
                                   <button
                                     type="button"
@@ -605,7 +706,10 @@ export default function Header({
                                     }
                                   >
                                     {isProcessing ? (
-                                      <Loader2 size={13} />
+                                      <Loader2
+                                        size={13}
+                                        className="notification-spinner"
+                                      />
                                     ) : (
                                       <Check size={13} />
                                     )}
@@ -624,9 +728,32 @@ export default function Header({
                                       )
                                     }
                                   >
-                                    Từ chối
+                                    {isProcessing ? (
+                                      'Đang xử lý...'
+                                    ) : (
+                                      'Từ chối'
+                                    )}
                                   </button>
                                 </div>
+                              )}
+
+                              {/* HIỂN THỊ TRẠNG THÁI */}
+                              {isInvitation && item.is_read && (
+                                <span className="invitation-processed">
+                                  Lời mời đã được xử lý hoặc đã đọc
+                                </span>
+                              )}
+
+                              {type === 'task_assigned' && (
+                                <span className="notification-category">
+                                  Công việc được giao
+                                </span>
+                              )}
+
+                              {type === 'subtask_assigned' && (
+                                <span className="notification-category">
+                                  Công việc con được giao
+                                </span>
                               )}
                             </div>
 
