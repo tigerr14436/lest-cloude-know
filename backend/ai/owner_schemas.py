@@ -5,14 +5,22 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field,
-)
+from pydantic import BaseModel, ConfigDict, Field
 
 
-OwnerAIMessageRole = Literal["user", "assistant"]
+# =========================================================
+# TYPES
+# =========================================================
+
+OwnerAIActionType = Literal[
+    "task_create",
+    "task_update",
+    "group_create",
+    "group_update",
+    "member_invite",
+    "member_role_update",
+    "weekly_schedule_create",
+]
 
 OwnerAIProposalStatus = Literal[
     "pending",
@@ -22,15 +30,19 @@ OwnerAIProposalStatus = Literal[
     "failed",
 ]
 
-OwnerAIActionType = Literal[
-    "task_create",
-    "group_create",
-    "member_invite",
-    "weekly_schedule_create",
+OwnerAIExecutionStatus = Literal[
+    "success",
+    "failed",
 ]
 
 
+# =========================================================
+# CONVERSATION
+# =========================================================
+
 class OwnerAIConversationCreate(BaseModel):
+    """Tạo cuộc trò chuyện Owner AI."""
+
     title: str = Field(
         default="Cuộc trò chuyện Owner AI mới",
         min_length=1,
@@ -39,6 +51,8 @@ class OwnerAIConversationCreate(BaseModel):
 
 
 class OwnerAIConversationResponse(BaseModel):
+    """Thông tin cuộc trò chuyện."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
@@ -49,25 +63,39 @@ class OwnerAIConversationResponse(BaseModel):
     updated_at: datetime
 
 
+# =========================================================
+# MESSAGE
+# =========================================================
+
+class OwnerAIMessageResponse(BaseModel):
+    """Tin nhắn trong cuộc trò chuyện."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    conversation_id: UUID
+    role: str
+    content: str
+    sources: dict | list | None = None
+    created_at: datetime
+
+
 class OwnerAIChatSendRequest(BaseModel):
+    """Nội dung Owner gửi cho AI."""
+
     message: str = Field(
         min_length=1,
         max_length=10000,
     )
 
 
-class OwnerAIMessageResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+# =========================================================
+# ACTION PROPOSAL
+# =========================================================
 
-    id: UUID
-    conversation_id: UUID
-    role: OwnerAIMessageRole
-    content: str
-    sources: dict | list | None = None
-    created_at: datetime
+class OwnerAIActionProposalResponse(BaseModel):
+    """Đề xuất hành động do Owner AI tạo."""
 
-
-class OwnerAIProposalResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
@@ -77,6 +105,7 @@ class OwnerAIProposalResponse(BaseModel):
     owner_id: UUID
 
     action_type: OwnerAIActionType
+
     payload: dict
 
     status: OwnerAIProposalStatus
@@ -91,30 +120,61 @@ class OwnerAIProposalResponse(BaseModel):
     updated_at: datetime
 
 
-class OwnerAIProposalReview(BaseModel):
-    """
-    Owner phê duyệt hoặc từ chối đề xuất.
+class OwnerAIProposalReviewRequest(BaseModel):
+    """Owner quyết định duyệt hoặc từ chối đề xuất."""
 
-    Có thể gửi payload đã chỉnh sửa trước khi duyệt.
-    Nếu payload không được gửi, Backend sử dụng
-    payload đã lưu trong Proposal.
-    """
+    action: Literal[
+        "approve",
+        "reject",
+    ]
 
-    action: Literal["approve", "reject"]
 
-    payload: dict | None = None
+class OwnerAIChatResponse(BaseModel):
+    """Kết quả sau khi Owner gửi tin nhắn."""
 
+    message: OwnerAIMessageResponse
+
+    proposal: OwnerAIActionProposalResponse | None = None
+
+
+# =========================================================
+# EXECUTION
+# =========================================================
+
+class OwnerAIExecutionResponse(BaseModel):
+    """Kết quả thực hiện một đề xuất."""
+
+    proposal_id: UUID
+
+    status: Literal[
+        "executed",
+        "failed",
+    ]
+
+    result: dict | None = None
+
+    message: str
+
+
+# =========================================================
+# EXECUTION LOG
+# =========================================================
 
 class OwnerAIExecutionLogResponse(BaseModel):
+    """Lịch sử thực hiện hành động của Owner AI."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
+
     proposal_id: UUID | None = None
+
     project_id: UUID
     owner_id: UUID
 
-    action_type: str
-    status: Literal["success", "failed"]
+    action_type: OwnerAIActionType
+
+    status: OwnerAIExecutionStatus
 
     request_payload: dict | None = None
     result: dict | None = None

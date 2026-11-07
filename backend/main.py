@@ -31,7 +31,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-
+from ai.owner_router import router as owner_ai_router
 
 from models import (
     Task,
@@ -165,7 +165,7 @@ app.include_router(subtask_focus_router)
 app.include_router(notifications_router)
 
 app.include_router(name_tags_router)
-
+app.include_router(owner_ai_router)
 
 # ============================================================
 # CORS
