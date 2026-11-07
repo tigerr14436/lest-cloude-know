@@ -669,3 +669,4 @@ class ProjectRepositoryOut(BaseModel):
 
     class Config:
         from_attributes = True
+

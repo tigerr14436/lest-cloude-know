@@ -5,19 +5,27 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import select, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ai.services.permission_service import (
+    get_project_ai_permissions,
+)
 from database import get_db
-from models import User, ProjectMember
+from models import User
 from project_groups import ProjectGroup, GroupMember
 from auth_deps import get_current_user
 
-from ai.models import AIKnowledgeItem
+from ai.models import (
+    AIKnowledgeItem,
+    AIKnowledgeShare,
+)
 from ai.schemas import (
     AIKnowledgeCreate,
     AIKnowledgeReview,
     AIKnowledgeResponse,
+    AIKnowledgeSharingUpdate,
+    AIKnowledgeSharingResponse,
 )
 
 
@@ -28,34 +36,31 @@ router = APIRouter(
 
 
 # =====================================================
-# Kiểm tra thành viên dự án
+# 1. Lấy quyền truy cập dự án
 # =====================================================
 
-async def get_membership(
+async def get_project_permissions(
     db: AsyncSession,
     project_id: uuid.UUID,
     user_id: uuid.UUID,
 ):
-    result = await db.execute(
-        select(ProjectMember).where(
-            ProjectMember.project_id == project_id,
-            ProjectMember.user_id == user_id,
-        )
+    """
+    Sử dụng permission_service làm nguồn xác định
+    quyền Owner, Leader và Member.
+
+    Owner được xác định bằng Project.owner_id.
+    Người ngoài dự án sẽ bị từ chối tại permission_service.
+    """
+
+    return await get_project_ai_permissions(
+        db=db,
+        project_id=project_id,
+        user_id=user_id,
     )
-
-    membership = result.scalar_one_or_none()
-
-    if membership is None:
-        raise HTTPException(
-            status_code=403,
-            detail="Bạn không thuộc dự án này",
-        )
-
-    return membership
 
 
 # =====================================================
-# Kiểm tra quyền gửi Knowledge vào nhóm
+# 2. Kiểm tra quyền gửi Knowledge vào nhóm
 # =====================================================
 
 async def validate_group_access(
@@ -68,8 +73,14 @@ async def validate_group_access(
     """
     Kiểm tra nhóm thuộc dự án.
 
-    Owner có thể gửi Knowledge vào mọi nhóm.
-    Member chỉ được gửi Knowledge vào nhóm mình tham gia.
+    Owner:
+        Có thể gửi Knowledge vào mọi nhóm.
+
+    Leader:
+        Có thể gửi Knowledge vào nhóm mình quản lý.
+
+    Member:
+        Chỉ có thể gửi Knowledge vào nhóm mình tham gia.
     """
 
     result = await db.execute(
@@ -87,9 +98,16 @@ async def validate_group_access(
             detail="Không tìm thấy nhóm trong dự án",
         )
 
+    # Owner được phép truy cập mọi nhóm thuộc dự án.
     if is_owner:
         return
 
+    # Leader được phép truy cập nhóm mình quản lý,
+    # kể cả khi chưa có bản ghi GroupMember.
+    if group.leader_id == user_id:
+        return
+
+    # Member phải có bản ghi tham gia nhóm.
     member_result = await db.execute(
         select(GroupMember).where(
             GroupMember.group_id == group_id,
@@ -107,7 +125,7 @@ async def validate_group_access(
 
 
 # =====================================================
-# 1. Thành viên gửi Knowledge mới
+# 3. Thành viên gửi Knowledge mới
 # =====================================================
 
 @router.post(
@@ -121,17 +139,16 @@ async def create_knowledge(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    # Kiểm tra thành viên dự án.
-    membership = await get_membership(
+    permissions = await get_project_permissions(
         db=db,
         project_id=project_id,
         user_id=current_user.id,
     )
 
-    is_owner = membership.role == "owner"
+    is_owner = permissions["is_owner"]
 
     # Nếu Knowledge thuộc một nhóm cụ thể,
-    # kiểm tra quyền gửi vào nhóm đó.
+    # kiểm tra quyền truy cập nhóm.
     if payload.group_id is not None:
         await validate_group_access(
             db=db,
@@ -162,7 +179,7 @@ async def create_knowledge(
 
 
 # =====================================================
-# 2. Xem danh sách Knowledge
+# 4. Xem danh sách Knowledge
 # =====================================================
 
 @router.get(
@@ -175,22 +192,21 @@ async def get_knowledge_list(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    # Kiểm tra thành viên dự án.
-    membership = await get_membership(
+    permissions = await get_project_permissions(
         db=db,
         project_id=project_id,
         user_id=current_user.id,
     )
 
-    is_owner = membership.role == "owner"
+    # -------------------------------------------------
+    # Owner: xem toàn bộ Knowledge trong dự án.
+    # -------------------------------------------------
 
-    # Truy xuất Knowledge thuộc dự án.
-    query = select(AIKnowledgeItem).where(
-        AIKnowledgeItem.project_id == project_id
-    )
+    if permissions["is_owner"]:
+        query = select(AIKnowledgeItem).where(
+            AIKnowledgeItem.project_id == project_id
+        )
 
-    if is_owner:
-        # Owner có thể xem tất cả trạng thái.
         if status is not None:
             allowed_statuses = {
                 "pending",
@@ -209,15 +225,50 @@ async def get_knowledge_list(
                 AIKnowledgeItem.status == status
             )
 
+    # -------------------------------------------------
+    # Leader / Member:
+    # Chỉ xem Knowledge đã duyệt và được chia sẻ.
+    # -------------------------------------------------
+
     else:
-        # Member chỉ được xem Knowledge đã duyệt.
-        query = query.where(
-            AIKnowledgeItem.status == "approved"
+        accessible_group_ids = (
+            permissions["accessible_group_ids"]
         )
 
-        # Không giới hạn theo group_id.
-        # Tất cả Knowledge đã duyệt trong dự án
-        # đều được chia sẻ cho mọi thành viên.
+        query = (
+            select(AIKnowledgeItem)
+            .outerjoin(
+                AIKnowledgeShare,
+                and_(
+                    AIKnowledgeShare.knowledge_id
+                    == AIKnowledgeItem.id,
+                    AIKnowledgeShare.project_id
+                    == AIKnowledgeItem.project_id,
+                ),
+            )
+            .where(
+                AIKnowledgeItem.project_id == project_id,
+                AIKnowledgeItem.status == "approved",
+            )
+        )
+
+        share_conditions = [
+            AIKnowledgeShare.scope == "project_shared",
+        ]
+
+        if accessible_group_ids:
+            share_conditions.append(
+                and_(
+                    AIKnowledgeShare.scope == "group_shared",
+                    AIKnowledgeShare.group_id.in_(
+                        accessible_group_ids
+                    ),
+                )
+            )
+
+        query = query.where(
+            or_(*share_conditions)
+        )
 
     query = query.order_by(
         AIKnowledgeItem.created_at.desc()
@@ -229,7 +280,7 @@ async def get_knowledge_list(
 
 
 # =====================================================
-# 3. Owner duyệt hoặc từ chối Knowledge
+# 5. Owner duyệt hoặc từ chối Knowledge
 # =====================================================
 
 @router.patch(
@@ -243,21 +294,19 @@ async def review_knowledge(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    # Kiểm tra thành viên dự án.
-    membership = await get_membership(
+    permissions = await get_project_permissions(
         db=db,
         project_id=project_id,
         user_id=current_user.id,
     )
 
-    # Chỉ Owner được duyệt Knowledge.
-    if membership.role != "owner":
+    # Chỉ Owner thực sự mới được duyệt Knowledge.
+    if not permissions["is_owner"]:
         raise HTTPException(
             status_code=403,
             detail="Chỉ Owner mới được duyệt Knowledge",
         )
 
-    # Tìm Knowledge thuộc đúng dự án.
     result = await db.execute(
         select(AIKnowledgeItem).where(
             AIKnowledgeItem.id == knowledge_id,
@@ -280,7 +329,6 @@ async def review_knowledge(
             detail="Knowledge này đã được xử lý",
         )
 
-    # Cập nhật trạng thái duyệt.
     knowledge.status = payload.status
 
     if payload.status == "approved":
@@ -291,3 +339,122 @@ async def review_knowledge(
     await db.refresh(knowledge)
 
     return knowledge
+
+
+# =====================================================
+# 6. Owner thay đổi phạm vi chia sẻ Knowledge
+# =====================================================
+
+@router.patch(
+    "/{knowledge_id}/sharing",
+    response_model=AIKnowledgeSharingResponse,
+)
+async def update_knowledge_sharing(
+    project_id: uuid.UUID,
+    knowledge_id: uuid.UUID,
+    payload: AIKnowledgeSharingUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Owner thay đổi phạm vi chia sẻ Knowledge.
+
+    Các phạm vi:
+        owner_private:
+            Chỉ Owner được đọc.
+
+        project_shared:
+            Các AI trong phạm vi dự án được đọc.
+
+        group_shared:
+            Chỉ các AI có quyền truy cập nhóm được đọc.
+    """
+
+    permissions = await get_project_permissions(
+        db=db,
+        project_id=project_id,
+        user_id=current_user.id,
+    )
+
+    if not permissions["is_owner"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Chỉ Owner mới được thay đổi phạm vi chia sẻ.",
+        )
+
+    knowledge_result = await db.execute(
+        select(AIKnowledgeItem).where(
+            AIKnowledgeItem.id == knowledge_id,
+            AIKnowledgeItem.project_id == project_id,
+        )
+    )
+
+    knowledge = knowledge_result.scalar_one_or_none()
+
+    if knowledge is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Không tìm thấy Knowledge trong dự án.",
+        )
+
+    if knowledge.status != "approved":
+        raise HTTPException(
+            status_code=409,
+            detail="Chỉ Knowledge đã duyệt mới được chia sẻ.",
+        )
+
+    # Kiểm tra group_id.
+    if payload.scope == "group_shared":
+
+        if payload.group_id is None:
+            raise HTTPException(
+                status_code=422,
+                detail="Phải chọn nhóm khi chia sẻ theo nhóm.",
+            )
+
+        await validate_group_access(
+            db=db,
+            project_id=project_id,
+            group_id=payload.group_id,
+            user_id=current_user.id,
+            is_owner=True,
+        )
+
+    elif payload.group_id is not None:
+        raise HTTPException(
+            status_code=422,
+            detail="Không được truyền group_id cho phạm vi này.",
+        )
+
+    # Tìm bản ghi chia sẻ hiện tại.
+    result = await db.execute(
+        select(AIKnowledgeShare)
+        .where(
+            AIKnowledgeShare.knowledge_id == knowledge_id,
+            AIKnowledgeShare.project_id == project_id,
+        )
+        .with_for_update()
+    )
+
+    sharing = result.scalar_one_or_none()
+
+    if sharing is None:
+        sharing = AIKnowledgeShare(
+            knowledge_id=knowledge_id,
+            project_id=project_id,
+            scope=payload.scope,
+            group_id=payload.group_id,
+            updated_by=current_user.id,
+        )
+
+        db.add(sharing)
+
+    else:
+        sharing.scope = payload.scope
+        sharing.group_id = payload.group_id
+        sharing.updated_by = current_user.id
+
+    await db.commit()
+    await db.refresh(sharing)
+
+    return sharing

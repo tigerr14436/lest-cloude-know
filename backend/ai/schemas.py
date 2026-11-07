@@ -155,3 +155,24 @@ class AISubtaskProposalActionResponse(BaseModel):
     status: Literal["confirmed", "rejected"]
     created_subtask_ids: list[UUID] = Field(default_factory=list)
     message: str
+
+class AIKnowledgeSharingUpdate(BaseModel):
+    scope: Literal[
+        "owner_private",
+        "project_shared",
+        "group_shared",
+    ]
+
+    group_id: UUID | None = None
+
+
+class AIKnowledgeSharingResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    knowledge_id: UUID
+    project_id: UUID
+    scope: str
+    group_id: UUID | None = None
+    updated_by: UUID | None = None
+    updated_at: datetime

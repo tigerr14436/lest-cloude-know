@@ -1,4 +1,3 @@
-
 """Database models dành cho Project AI."""
 
 import uuid
@@ -12,11 +11,10 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import UUID, JSONB
-from database import Base
+from sqlalchemy.orm import Mapped, mapped_column
 
+from database import Base
 
 class AIProjectProfile(Base):
     __tablename__ = "ai_project_profiles"
@@ -343,4 +341,60 @@ class AIActionProposal(Base):
     rejected_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
+    )
+
+class AIKnowledgeShare(Base):
+    __tablename__ = "ai_knowledge_shares"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "knowledge_id",
+            name="uq_ai_knowledge_share_knowledge",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    knowledge_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("ai_knowledge_items.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    scope: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default="owner_private",
+    )
+
+    group_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("project_groups.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
     )

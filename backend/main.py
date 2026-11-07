@@ -102,10 +102,19 @@ from ai.profile_router import router as ai_profile_router
 from ai.models import (
     AIProjectProfile,
     AIKnowledgeItem,
+    AIKnowledgeShare,
     AIConversation,
     AIMessage,
     AIActionProposal,
 )
+
+from ai.owner_models import (
+    OwnerAIConversation,
+    OwnerAIMessage,
+    OwnerAIActionProposal,
+    OwnerAIExecutionLog,
+)
+
 
 from ai.chat_router import router as ai_chat_router
 from ai.router import router as ai_router
