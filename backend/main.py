@@ -9,6 +9,7 @@ Lưu ý:
     create_all() chỉ tạo bảng mới, không tự sửa bảng đã tồn tại.
 """
 
+import os
 import uuid
 import random
 import string
@@ -948,7 +949,6 @@ async def delete_or_leave_project(
         )
 
     if member.role == "owner":
-
         await db.execute(
             ProjectRepository.__table__.delete().where(
                 ProjectRepository.project_id == project_id
@@ -1525,8 +1525,6 @@ async def get_dashboard(
         "projectProgressChart": project_progress,
         "recentActivities": activities[:5],
     }
-
-
 # ============================================================
 # GITHUB REPOSITORIES
 # ============================================================
