@@ -1,7 +1,16 @@
+
 import React from "react";
 import { PROJECT_TABS } from "../constants";
 
-export default function ProjectTabs({ activeTab, onChange }) {
+export default function ProjectTabs({
+  activeTab,
+  onChange,
+  isProjectOwner,
+}) {
+  const visibleTabs = PROJECT_TABS.filter(
+    (tab) => tab.key !== "owner-ai" || isProjectOwner
+  );
+
   return (
     <div
       style={{
@@ -13,7 +22,7 @@ export default function ProjectTabs({ activeTab, onChange }) {
         flexWrap: "wrap",
       }}
     >
-      {PROJECT_TABS.map(({ key, label, icon: Icon }) => (
+      {visibleTabs.map(({ key, label, icon: Icon }) => (
         <button
           key={key}
           onClick={() => onChange(key)}

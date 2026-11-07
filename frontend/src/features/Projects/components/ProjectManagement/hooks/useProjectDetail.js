@@ -36,32 +36,70 @@ export default function useProjectDetail(selectedProject, showNotification) {
   }, [projectId]);
 
   // Tải Task của dự án
-  useEffect(() => {
-    if (!projectId) {
-      setProjectTasks([]);
-      return;
-    }
+  // Tải Task của dự án và tự đồng bộ khi Owner AI thay đổi Task
+useEffect(() => {
+  if (!projectId) {
+    setProjectTasks([]);
+    return;
+  }
 
-    const fetchProjectTasks = async () => {
-      setIsLoadingTasks(true);
+  let active = true;
 
-      try {
-        const data = await sendAuthenticatedRequest(
-          `/tasks?project_id=${projectId}`,
-        );
+  const fetchProjectTasks = async () => {
+    setIsLoadingTasks(true);
 
+    try {
+      const data = await sendAuthenticatedRequest(
+        `/tasks?project_id=${projectId}`
+      );
+
+      if (active) {
         setProjectTasks(Array.isArray(data) ? data : []);
-      } catch (error) {
-        setProjectTasks([]);
-        showNotification("loi", "Không tải được công việc", error.message);
-      } finally {
+      }
+    } catch (error) {
+      if (active) {
+        showNotification(
+          "loi",
+          "Không tải được công việc",
+          error.message
+        );
+      }
+    } finally {
+      if (active) {
         setIsLoadingTasks(false);
       }
-    };
+    }
+  };
 
-    fetchProjectTasks();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
+  // Tải Task lần đầu khi mở dự án
+  fetchProjectTasks();
+
+  // Nhận thông báo khi Owner AI thực thi thay đổi Task
+  const handleProjectTasksUpdated = (event) => {
+    const updatedProjectId = event.detail?.projectId;
+
+    if (
+      String(updatedProjectId) === String(projectId)
+    ) {
+      fetchProjectTasks();
+    }
+  };
+
+  window.addEventListener(
+    "devtask:project-tasks-updated",
+    handleProjectTasksUpdated
+  );
+
+  return () => {
+    active = false;
+
+    window.removeEventListener(
+      "devtask:project-tasks-updated",
+      handleProjectTasksUpdated
+    );
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [projectId]);
 
   // Tải thành viên dự án
   useEffect(() => {

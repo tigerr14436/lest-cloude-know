@@ -27,6 +27,8 @@ import ProjectListView from "./components/ProjectListView";
 import ProjectModal from "./components/ProjectModal";
 import TaskModal from "./components/TaskModal";
 
+import OwnerAIChat from "../OwnerAIChat";
+
 export default function ProjectManagement() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -88,7 +90,10 @@ export default function ProjectManagement() {
   const stats = useProjectStats(projectTasks, groups, projectMembers);
 
   // ---------- Mời thành viên (Name Tag / email) ----------
-  const invitation = useProjectInvitation(selectedProject?.id, showNotification);
+  const invitation = useProjectInvitation(
+    selectedProject?.id,
+    showNotification,
+  );
 
   // ---------- Task ----------
   const taskApi = useTaskManagement({
@@ -120,7 +125,11 @@ export default function ProjectManagement() {
             onCreateTask={() => taskApi.openCreateTaskModal("todo")}
           />
 
-          <ProjectTabs activeTab={activeTab} onChange={setActiveTab} />
+          <ProjectTabs
+            activeTab={activeTab}
+            onChange={setActiveTab}
+            isProjectOwner={isProjectOwner}
+          />
 
           {activeTab === "overview" && (
             <OverviewTab
@@ -193,6 +202,13 @@ export default function ProjectManagement() {
               isProjectOwner={isProjectOwner}
               projectTasks={projectTasks}
               showNotification={showNotification}
+            />
+          )}
+
+          {activeTab === "owner-ai" && isProjectOwner && (
+            <OwnerAIChat
+              projectId={selectedProject.id}
+              projectName={selectedProject.name}
             />
           )}
         </div>

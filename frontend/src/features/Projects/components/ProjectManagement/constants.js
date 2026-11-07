@@ -5,6 +5,7 @@ import {
   Code2,
   FileCode,
   DollarSign,
+  Bot,
 } from "lucide-react";
 
 // Form mặc định khi tạo Task
@@ -35,4 +36,5 @@ export const PROJECT_TABS = [
   { key: "code", label: "Quản lý Code", icon: Code2 },
   { key: "review", label: "Code Review", icon: FileCode },
   { key: "cost", label: "Tính chi phí dự án", icon: DollarSign },
+  { key: "owner-ai", label: "Owner AI", icon: Bot },
 ];
