@@ -1,4 +1,3 @@
-
 """API hội thoại riêng tư dành cho Owner AI."""
 
 import uuid
@@ -16,6 +15,7 @@ from ai.owner_models import (
     OwnerAIConversation,
     OwnerAIMessage,
     OwnerAIActionProposal,
+    OwnerAIExecutionLog,
 )
 
 from ai.owner_schemas import (
@@ -24,6 +24,9 @@ from ai.owner_schemas import (
     OwnerAIChatSendRequest,
     OwnerAIMessageResponse,
     OwnerAIActionProposalResponse,
+    OwnerAIProposalReviewRequest,
+    OwnerAIExecutionResponse,
+    OwnerAIExecutionLogResponse,
 )
 
 from ai.services.permission_service import (
@@ -31,6 +34,7 @@ from ai.services.permission_service import (
 )
 
 from ai.services.owner_ai_service import OwnerAIService
+from ai.services.owner_action_executor import OwnerAIActionExecutor
 
 
 router = APIRouter(
@@ -572,6 +576,324 @@ async def list_owner_proposals(
         )
         .order_by(
             OwnerAIActionProposal.created_at.desc()
+        )
+    )
+
+    return result.scalars().all()
+
+# =====================================================
+# 10. OWNER DUYỆT HOẶC TỪ CHỐI ĐỀ XUẤT
+# =====================================================
+
+@router.post(
+    "/{conversation_id}/proposals/{proposal_id}/review",
+    response_model=OwnerAIActionProposalResponse,
+)
+async def review_owner_proposal(
+    project_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    proposal_id: uuid.UUID,
+    payload: OwnerAIProposalReviewRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    # Chỉ Owner thực tế được duyệt đề xuất.
+    await require_owner(
+        db,
+        project_id,
+        current_user.id,
+    )
+
+    await get_owned_conversation(
+        db,
+        project_id,
+        conversation_id,
+        current_user.id,
+    )
+
+    # Khóa bản ghi để tránh hai yêu cầu duyệt đồng thời.
+    proposal = await get_owned_proposal(
+        db,
+        project_id,
+        conversation_id,
+        proposal_id,
+        current_user.id,
+        lock=True,
+    )
+
+    if proposal.status != "pending":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Chỉ đề xuất đang chờ duyệt mới có thể "
+                "được duyệt hoặc từ chối."
+            ),
+        )
+
+    now = datetime.now(timezone.utc)
+
+    if payload.action == "approve":
+        proposal.status = "approved"
+    else:
+        proposal.status = "rejected"
+
+    proposal.reviewed_by = current_user.id
+    proposal.reviewed_at = now
+
+    try:
+        await db.commit()
+        await db.refresh(proposal)
+
+        return proposal
+
+    except Exception as error:
+        await db.rollback()
+
+        print(f"Review Owner AI proposal error: {error}")
+
+        raise HTTPException(
+            status_code=500,
+            detail="Không thể cập nhật trạng thái đề xuất.",
+        )
+
+
+# =====================================================
+# 11. OWNER THỰC THI ĐỀ XUẤT ĐÃ DUYỆT
+# =====================================================
+
+@router.post(
+    "/{conversation_id}/proposals/{proposal_id}/execute",
+    response_model=OwnerAIExecutionResponse,
+)
+async def execute_owner_proposal(
+    project_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    proposal_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    # -------------------------------------------------
+    # 11.1. KIỂM TRA QUYỀN OWNER
+    # -------------------------------------------------
+
+    await require_owner(
+        db,
+        project_id,
+        current_user.id,
+    )
+
+    await get_owned_conversation(
+        db,
+        project_id,
+        conversation_id,
+        current_user.id,
+    )
+
+    # -------------------------------------------------
+    # 11.2. KHÓA PROPOSAL
+    # -------------------------------------------------
+
+    proposal = await get_owned_proposal(
+        db,
+        project_id,
+        conversation_id,
+        proposal_id,
+        current_user.id,
+        lock=True,
+    )
+
+    if proposal.status != "approved":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Đề xuất phải được Owner duyệt trước "
+                "khi thực thi. Đề xuất hiện tại có trạng thái: "
+                f"{proposal.status}."
+            ),
+        )
+
+    # Lưu lại dữ liệu trước khi thực thi để sử dụng khi ghi log.
+    request_payload = dict(proposal.payload or {})
+    action_type = proposal.action_type
+
+    # -------------------------------------------------
+    # 11.3. THỰC THI ACTION
+    # -------------------------------------------------
+
+    executor = OwnerAIActionExecutor(db)
+
+    try:
+        result = await executor.execute(
+            proposal=proposal,
+            owner_id=current_user.id,
+        )
+
+        if not isinstance(result, dict):
+            result = {
+                "data": str(result),
+            }
+
+        proposal.status = "executed"
+        proposal.result = result
+        proposal.executed_at = datetime.now(timezone.utc)
+
+        execution_log = OwnerAIExecutionLog(
+            proposal_id=proposal.id,
+            project_id=project_id,
+            owner_id=current_user.id,
+            action_type=action_type,
+            status="success",
+            request_payload=request_payload,
+            result=result,
+            error_message=None,
+        )
+
+        db.add(execution_log)
+
+        # Lưu dữ liệu nghiệp vụ, proposal và execution log
+        # trong cùng một transaction.
+        await db.commit()
+
+        return OwnerAIExecutionResponse(
+            proposal_id=proposal.id,
+            status="executed",
+            result=result,
+            message="Đề xuất đã được thực thi thành công.",
+        )
+
+    except Exception as error:
+
+        # -------------------------------------------------
+        # 11.4. ROLLBACK DỮ LIỆU NGHIỆP VỤ NẾU THẤT BẠI
+        # -------------------------------------------------
+
+        await db.rollback()
+
+        print(f"Owner AI execution error: {error}")
+
+        if isinstance(error, HTTPException):
+            error_message = str(error.detail)
+        elif isinstance(error, ValueError):
+            error_message = str(error)
+        else:
+            # Không trả chi tiết lỗi nội bộ cho client.
+            error_message = "Backend không thể thực thi đề xuất."
+
+        # -------------------------------------------------
+        # 11.5. GHI NHẬN TRẠNG THÁI THẤT BẠI
+        # -------------------------------------------------
+
+        try:
+            # Sau rollback phải truy vấn lại proposal.
+            # Không sử dụng object cũ vì transaction đã rollback.
+            failed_proposal = await get_owned_proposal(
+                db,
+                project_id,
+                conversation_id,
+                proposal_id,
+                current_user.id,
+                lock=True,
+            )
+
+            # Chỉ đánh dấu failed nếu proposal vẫn đang approved.
+            if failed_proposal.status == "approved":
+                failed_proposal.status = "failed"
+                failed_proposal.result = {
+                    "error": error_message,
+                }
+
+                failed_log = OwnerAIExecutionLog(
+                    proposal_id=failed_proposal.id,
+                    project_id=project_id,
+                    owner_id=current_user.id,
+                    action_type=action_type,
+                    status="failed",
+                    request_payload=request_payload,
+                    result=None,
+                    error_message=error_message,
+                )
+
+                db.add(failed_log)
+
+                await db.commit()
+
+            else:
+                await db.rollback()
+
+        except Exception as log_error:
+            await db.rollback()
+
+            print(
+                "Owner AI failed execution log error: "
+                f"{log_error}"
+            )
+
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "Thực thi thất bại và Backend không thể "
+                    "ghi nhật ký xử lý."
+                ),
+            )
+
+        return OwnerAIExecutionResponse(
+            proposal_id=proposal_id,
+            status="failed",
+            result=None,
+            message=error_message,
+        )
+
+
+# =====================================================
+# 12. LỊCH SỬ THỰC THI OWNER AI
+# =====================================================
+
+@router.get(
+    "/{conversation_id}/execution-logs",
+    response_model=list[OwnerAIExecutionLogResponse],
+)
+async def list_owner_execution_logs(
+    project_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await require_owner(
+        db,
+        project_id,
+        current_user.id,
+    )
+
+    conversation = await get_owned_conversation(
+        db,
+        project_id,
+        conversation_id,
+        current_user.id,
+    )
+
+    # Chỉ lấy log thuộc những proposal trong hội thoại này.
+    proposal_ids_result = await db.execute(
+        select(OwnerAIActionProposal.id).where(
+            OwnerAIActionProposal.conversation_id == conversation.id,
+            OwnerAIActionProposal.project_id == project_id,
+            OwnerAIActionProposal.owner_id == current_user.id,
+        )
+    )
+
+    proposal_ids = proposal_ids_result.scalars().all()
+
+    if not proposal_ids:
+        return []
+
+    result = await db.execute(
+        select(OwnerAIExecutionLog)
+        .where(
+            OwnerAIExecutionLog.proposal_id.in_(proposal_ids),
+            OwnerAIExecutionLog.project_id == project_id,
+            OwnerAIExecutionLog.owner_id == current_user.id,
+        )
+        .order_by(
+            OwnerAIExecutionLog.created_at.desc()
         )
     )
 

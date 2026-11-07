@@ -421,10 +421,16 @@ class OwnerAIService:
                 if not isinstance(name_tag, str):
                     raise ValueError("Name Tag không hợp lệ.")
 
-                name_tag = name_tag.strip().upper()
+                name_tag = name_tag.strip().upper().removeprefix("#")
 
-                if not re.fullmatch(r"[A-Z0-9]{5}", name_tag):
-                    raise ValueError("Name Tag phải có đúng 5 ký tự.")
+                if (
+                    len(name_tag) != 4
+                    or not name_tag.isascii()
+                    or not name_tag.isalnum()
+                ):
+                    raise ValueError("Name Tag phải có dạng #ABCD.")
+
+                name_tag = f"#{name_tag}"
 
             return {
                 "email": email,
