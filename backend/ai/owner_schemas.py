@@ -1,11 +1,16 @@
-
 """Pydantic schemas dành riêng cho Owner AI."""
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+)
 
 
 # =========================================================
@@ -34,6 +39,15 @@ OwnerAIProposalStatus = Literal[
 OwnerAIExecutionStatus = Literal[
     "success",
     "failed",
+]
+
+# Chuỗi bắt buộc: tự cắt khoảng trắng hai đầu, không được rỗng.
+RequiredText = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        min_length=1,
+    ),
 ]
 
 
@@ -144,6 +158,101 @@ class OwnerAIChatResponse(BaseModel):
     message: OwnerAIMessageResponse
 
     proposal: OwnerAIActionProposalResponse | None = None
+
+
+# =========================================================
+# PROJECT SETUP PAYLOAD EDIT
+# =========================================================
+# Dùng cho API PATCH .../proposals/{proposal_id}/payload.
+#
+# Schema chỉ kiểm tra HÌNH DẠNG dữ liệu.
+# Các kiểm tra cần DB hoặc nghiệp vụ (thành viên dự án,
+# group_key khớp key nhóm, giới hạn số lượng...) được
+# thực hiện ở router.
+#
+# extra="allow": giữ nguyên các field phụ mà AI hoặc
+# executor có thể đang dùng, tránh làm mất dữ liệu.
+
+def _blank_to_none(value):
+    """Chuỗi rỗng hoặc chỉ có khoảng trắng -> None."""
+
+    if isinstance(value, str):
+        value = value.strip()
+
+        if not value:
+            return None
+
+    return value
+
+
+class OwnerAIProjectSetupGroup(BaseModel):
+    """Một nhóm trong đề xuất project_setup_create."""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: RequiredText
+    key: RequiredText
+
+    # UUID thành viên hợp lệ trong dự án, hoặc None.
+    leader_id: UUID | None = None
+
+    @field_validator("leader_id", mode="before")
+    @classmethod
+    def normalize_leader_id(cls, value):
+        return _blank_to_none(value)
+
+
+class OwnerAIProjectSetupTask(BaseModel):
+    """Một task trong đề xuất project_setup_create."""
+
+    model_config = ConfigDict(extra="allow")
+
+    title: RequiredText
+    description: str | None = None
+    priority: str | None = None
+    deadline: str | None = None
+
+    # Phải khớp với key của một nhóm (router kiểm tra).
+    group_key: str | None = None
+
+    # UUID thành viên hợp lệ trong dự án, hoặc None.
+    assignee_id: UUID | None = None
+
+    @field_validator(
+        "description",
+        "priority",
+        "deadline",
+        "group_key",
+        "assignee_id",
+        mode="before",
+    )
+    @classmethod
+    def normalize_optional_values(cls, value):
+        return _blank_to_none(value)
+
+    @field_validator("priority", mode="after")
+    @classmethod
+    def lowercase_priority(cls, value):
+        return value.lower() if value else value
+
+
+class OwnerAIProjectSetupPayload(BaseModel):
+    """Payload đầy đủ của đề xuất project_setup_create."""
+
+    model_config = ConfigDict(extra="allow")
+
+    groups: list[OwnerAIProjectSetupGroup]
+    tasks: list[OwnerAIProjectSetupTask]
+
+
+class OwnerAIProposalPayloadUpdateRequest(BaseModel):
+    """Owner gửi payload đã chỉnh sửa của một đề xuất."""
+
+    payload: OwnerAIProjectSetupPayload
+
+
+class OwnerAIChatResponse_PLACEHOLDER_REMOVED:
+    pass
 
 
 # =========================================================

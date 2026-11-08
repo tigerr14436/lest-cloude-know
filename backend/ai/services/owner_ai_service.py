@@ -312,6 +312,7 @@ class OwnerAIService:
             self._check_allowed_keys(
                 item,
                 {
+                    "key",
                     "title",
                     "description",
                     "priority",
