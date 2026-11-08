@@ -3,7 +3,7 @@
 
 import json
 import re
-from datetime import date
+from datetime import date, datetime
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +25,7 @@ class OwnerAIService:
         "member_invite",
         "member_role_update",
         "weekly_schedule_create",
+        "project_setup_create",
     }
 
     ALLOWED_PRIORITIES = {"low", "medium", "high"}
@@ -32,6 +33,8 @@ class OwnerAIService:
 
     MAX_HISTORY = 10
     MAX_MESSAGE_LENGTH = 10000
+    MAX_TASKS_PER_PROPOSAL = 30
+    MAX_GROUPS_PER_SETUP = 10
 
     def __init__(self):
         self.provider = OllamaProvider()
@@ -73,7 +76,11 @@ class OwnerAIService:
     # =====================================================
 
     @staticmethod
-    def _require_text(payload: dict, key: str, max_length: int = 255) -> str:
+    def _require_text(
+        payload: dict,
+        key: str,
+        max_length: int = 255,
+    ) -> str:
         value = payload.get(key)
 
         if not isinstance(value, str) or not value.strip():
@@ -82,7 +89,9 @@ class OwnerAIService:
         value = value.strip()
 
         if len(value) > max_length:
-            raise ValueError(f"Dữ liệu {key} vượt quá {max_length} ký tự.")
+            raise ValueError(
+                f"Dữ liệu {key} vượt quá {max_length} ký tự."
+            )
 
         return value
 
@@ -91,10 +100,15 @@ class OwnerAIService:
         try:
             return str(UUID(str(value)))
         except (ValueError, TypeError, AttributeError) as exc:
-            raise ValueError(f"{field_name} không phải UUID hợp lệ.") from exc
+            raise ValueError(
+                f"{field_name} không phải UUID hợp lệ."
+            ) from exc
 
     @staticmethod
-    def _check_allowed_keys(payload: dict, allowed: set[str]):
+    def _check_allowed_keys(
+        payload: dict,
+        allowed: set[str],
+    ):
         unknown = set(payload.keys()) - allowed
 
         if unknown:
@@ -105,20 +119,48 @@ class OwnerAIService:
 
     @staticmethod
     def _validate_date(value, field_name: str):
+        """
+        Chuẩn hóa ngày về YYYY-MM-DD.
+
+        Chấp nhận:
+        - 2026-11-12
+        - 2026-11-12T23:59:59
+        - 2026-11-12T23:59:59.999999+00:00
+        - 2026-11-12T23:59:59Z
+
+        Backend sẽ lưu Deadline theo quy ước cuối ngày UTC
+        trong OwnerAIActionExecutor.
+        """
+
         if value is None:
             return None
 
         if not isinstance(value, str):
-            raise ValueError(f"{field_name} phải là chuỗi ngày YYYY-MM-DD.")
+            raise ValueError(
+                f"{field_name} phải là chuỗi ngày hợp lệ."
+            )
+
+        value = value.strip()
+
+        if not value:
+            return None
 
         try:
-            date.fromisoformat(value)
+            parsed_date = date.fromisoformat(value)
+            return parsed_date.isoformat()
+        except ValueError:
+            pass
+
+        try:
+            normalized = value.replace("Z", "+00:00")
+            parsed_datetime = datetime.fromisoformat(normalized)
+
+            return parsed_datetime.date().isoformat()
+
         except ValueError as exc:
             raise ValueError(
-                f"{field_name} không đúng định dạng YYYY-MM-DD."
+                f"{field_name} không đúng định dạng ngày hợp lệ."
             ) from exc
-
-        return value
 
     @staticmethod
     def _get_context_indexes(project_context: dict):
@@ -143,15 +185,225 @@ class OwnerAIService:
         return groups, tasks, members
 
     # =====================================================
-    # 3. VALIDATE ACTION PAYLOAD
+    # 3. VALIDATE PROJECT SETUP
+    # =====================================================
+
+    def _validate_project_setup(
+        self,
+        payload: dict,
+        members: dict,
+    ) -> dict:
+        """
+        Kiểm tra đề xuất tạo nhiều Group và Task.
+
+        group_key chỉ là mã tham chiếu nội bộ của proposal.
+        Không phải UUID và không được ghi vào Database làm ID.
+
+        Task bắt buộc tham chiếu một Group thông qua group_key.
+        """
+
+        self._check_allowed_keys(
+            payload,
+            {"groups", "tasks"},
+        )
+
+        raw_groups = payload.get("groups")
+        raw_tasks = payload.get("tasks")
+
+        if not isinstance(raw_groups, list) or not raw_groups:
+            raise ValueError(
+                "Đề xuất phải có ít nhất một Group."
+            )
+
+        if len(raw_groups) > self.MAX_GROUPS_PER_SETUP:
+            raise ValueError(
+                f"Một đề xuất chỉ được tạo tối đa "
+                f"{self.MAX_GROUPS_PER_SETUP} Group."
+            )
+
+        if not isinstance(raw_tasks, list) or not raw_tasks:
+            raise ValueError(
+                "Đề xuất phải có ít nhất một Task."
+            )
+
+        if len(raw_tasks) > self.MAX_TASKS_PER_PROPOSAL:
+            raise ValueError(
+                f"Một đề xuất chỉ được tạo tối đa "
+                f"{self.MAX_TASKS_PER_PROPOSAL} Task."
+            )
+
+        # -------------------------------------------------
+        # VALIDATE GROUPS
+        # -------------------------------------------------
+
+        validated_groups = []
+        group_keys = set()
+
+        for index, item in enumerate(raw_groups, start=1):
+            if not isinstance(item, dict):
+                raise ValueError(
+                    f"Group thứ {index} không đúng cấu trúc."
+                )
+
+            self._check_allowed_keys(
+                item,
+                {"key", "name", "leader_id"},
+            )
+
+            key = self._require_text(
+                item,
+                "key",
+                max_length=40,
+            )
+
+            if not re.fullmatch(r"[a-zA-Z0-9_-]+", key):
+                raise ValueError(
+                    f"Key của Group thứ {index} chỉ được chứa "
+                    "chữ, số, dấu gạch ngang và gạch dưới."
+                )
+
+            normalized_key = key.casefold()
+
+            if normalized_key in group_keys:
+                raise ValueError(
+                    f"Key Group '{key}' bị trùng."
+                )
+
+            group_keys.add(normalized_key)
+
+            group = {
+                "key": key,
+                "name": self._require_text(
+                    item,
+                    "name",
+                    max_length=255,
+                ),
+                "leader_id": None,
+            }
+
+            if item.get("leader_id") is not None:
+                leader_id = self._normalize_uuid(
+                    item["leader_id"],
+                    f"groups[{index}].leader_id",
+                )
+
+                if leader_id not in members:
+                    raise ValueError(
+                        f"Leader của Group thứ {index} "
+                        "không thuộc dự án."
+                    )
+
+                group["leader_id"] = leader_id
+
+            validated_groups.append(group)
+
+        # -------------------------------------------------
+        # VALIDATE TASKS
+        # -------------------------------------------------
+
+        validated_tasks = []
+
+        for index, item in enumerate(raw_tasks, start=1):
+            if not isinstance(item, dict):
+                raise ValueError(
+                    f"Task thứ {index} không đúng cấu trúc."
+                )
+
+            self._check_allowed_keys(
+                item,
+                {
+                    "title",
+                    "description",
+                    "priority",
+                    "deadline",
+                    "assignee_id",
+                    "group_key",
+                },
+            )
+
+            group_key = self._require_text(
+                item,
+                "group_key",
+                max_length=40,
+            )
+
+            if group_key.casefold() not in group_keys:
+                raise ValueError(
+                    f"Task thứ {index} tham chiếu Group "
+                    f"'{group_key}' không tồn tại trong đề xuất."
+                )
+
+            description = item.get("description")
+
+            if (
+                description is not None
+                and not isinstance(description, str)
+            ):
+                raise ValueError(
+                    f"Mô tả Task thứ {index} không hợp lệ."
+                )
+
+            if (
+                isinstance(description, str)
+                and len(description) > 10000
+            ):
+                raise ValueError(
+                    f"Mô tả Task thứ {index} vượt quá 10000 ký tự."
+                )
+
+            priority = item.get("priority", "medium")
+
+            if priority not in self.ALLOWED_PRIORITIES:
+                raise ValueError(
+                    f"Priority của Task thứ {index} không hợp lệ."
+                )
+
+            task = {
+                "title": self._require_text(
+                    item,
+                    "title",
+                ),
+                "description": description,
+                "priority": priority,
+                "deadline": self._validate_date(
+                    item.get("deadline"),
+                    f"tasks[{index}].deadline",
+                ),
+                "assignee_id": None,
+                "group_key": group_key,
+            }
+
+            if item.get("assignee_id") is not None:
+                assignee_id = self._normalize_uuid(
+                    item["assignee_id"],
+                    f"tasks[{index}].assignee_id",
+                )
+
+                if assignee_id not in members:
+                    raise ValueError(
+                        f"Người được giao Task thứ {index} "
+                        "không thuộc dự án."
+                    )
+
+                task["assignee_id"] = assignee_id
+
+            validated_tasks.append(task)
+
+        return {
+            "groups": validated_groups,
+            "tasks": validated_tasks,
+        }
+
+    # =====================================================
+    # 4. VALIDATE ACTION PAYLOAD
     # =====================================================
 
     def _validate_action_payload(
         self,
         action_type: str,
-        payload: dict,
+        payload: dict | list[dict],
         project_context: dict,
-    ) -> dict:
+    ) -> dict | list[dict]:
         """
         Kiểm tra sơ bộ đề xuất AI.
 
@@ -161,14 +413,69 @@ class OwnerAIService:
         """
 
         if action_type not in self.ALLOWED_ACTIONS:
-            raise ValueError("Loại hành động không được hỗ trợ.")
+            raise ValueError(
+                "Loại hành động không được hỗ trợ."
+            )
+
+        # -------------------------------------------------
+        # TASK CREATE - MULTIPLE TASKS
+        # -------------------------------------------------
+
+        if action_type == "task_create" and isinstance(payload, list):
+
+            if not payload:
+                raise ValueError(
+                    "Danh sách Task đề xuất không được để trống."
+                )
+
+            if len(payload) > self.MAX_TASKS_PER_PROPOSAL:
+                raise ValueError(
+                    f"Một lần chỉ được đề xuất tối đa "
+                    f"{self.MAX_TASKS_PER_PROPOSAL} Task."
+                )
+
+            validated_tasks = []
+
+            for index, item in enumerate(payload, start=1):
+                if not isinstance(item, dict):
+                    raise ValueError(
+                        f"Dữ liệu Task thứ {index} không hợp lệ."
+                    )
+
+                try:
+                    validated_task = self._validate_action_payload(
+                        action_type="task_create",
+                        payload=item,
+                        project_context=project_context,
+                    )
+
+                    validated_tasks.append(validated_task)
+
+                except ValueError as exc:
+                    raise ValueError(
+                        f"Task thứ {index}: {str(exc)}"
+                    ) from exc
+
+            return validated_tasks
 
         if not isinstance(payload, dict):
-            raise ValueError("Payload đề xuất không hợp lệ.")
+            raise ValueError(
+                "Payload đề xuất không hợp lệ."
+            )
 
         groups, tasks, members = self._get_context_indexes(
             project_context
         )
+
+        # -------------------------------------------------
+        # PROJECT SETUP CREATE
+        # -------------------------------------------------
+
+        if action_type == "project_setup_create":
+            return self._validate_project_setup(
+                payload=payload,
+                members=members,
+            )
 
         # -------------------------------------------------
         # TASK CREATE
@@ -201,10 +508,14 @@ class OwnerAIService:
                 result["description"] is not None
                 and not isinstance(result["description"], str)
             ):
-                raise ValueError("Mô tả Task không hợp lệ.")
+                raise ValueError(
+                    "Mô tả Task không hợp lệ."
+                )
 
             if result["priority"] not in self.ALLOWED_PRIORITIES:
-                raise ValueError("Priority của Task không hợp lệ.")
+                raise ValueError(
+                    "Priority của Task không hợp lệ."
+                )
 
             if payload.get("assignee_id"):
                 user_id = self._normalize_uuid(
@@ -214,7 +525,8 @@ class OwnerAIService:
 
                 if user_id not in members:
                     raise ValueError(
-                        "Người được giao không thuộc danh sách thành viên dự án."
+                        "Người được giao không thuộc danh sách "
+                        "thành viên dự án."
                     )
 
                 result["assignee_id"] = user_id
@@ -263,27 +575,37 @@ class OwnerAIService:
             updates = {}
 
             if "title" in payload:
-                updates["title"] = self._require_text(payload, "title")
+                updates["title"] = self._require_text(
+                    payload,
+                    "title",
+                )
 
             if "description" in payload:
                 description = payload["description"]
 
-                if description is not None and not isinstance(
-                    description, str
+                if (
+                    description is not None
+                    and not isinstance(description, str)
                 ):
-                    raise ValueError("Mô tả Task không hợp lệ.")
+                    raise ValueError(
+                        "Mô tả Task không hợp lệ."
+                    )
 
                 updates["description"] = description
 
             if "status" in payload:
                 if payload["status"] not in self.ALLOWED_STATUSES:
-                    raise ValueError("Status của Task không hợp lệ.")
+                    raise ValueError(
+                        "Status của Task không hợp lệ."
+                    )
 
                 updates["status"] = payload["status"]
 
             if "priority" in payload:
                 if payload["priority"] not in self.ALLOWED_PRIORITIES:
-                    raise ValueError("Priority của Task không hợp lệ.")
+                    raise ValueError(
+                        "Priority của Task không hợp lệ."
+                    )
 
                 updates["priority"] = payload["priority"]
 
@@ -310,7 +632,9 @@ class OwnerAIService:
                 updates["assignee_id"] = None
 
             if not updates:
-                raise ValueError("Không có trường nào được yêu cầu cập nhật.")
+                raise ValueError(
+                    "Không có trường nào được yêu cầu cập nhật."
+                )
 
             return {
                 "task_id": task_id,
@@ -350,7 +674,11 @@ class OwnerAIService:
         # -------------------------------------------------
 
         if action_type == "group_update":
-            allowed = {"group_id", "name", "leader_id"}
+            allowed = {
+                "group_id",
+                "name",
+                "leader_id",
+            }
             self._check_allowed_keys(payload, allowed)
 
             group_id = self._normalize_uuid(
@@ -366,7 +694,10 @@ class OwnerAIService:
             updates = {}
 
             if "name" in payload:
-                updates["name"] = self._require_text(payload, "name")
+                updates["name"] = self._require_text(
+                    payload,
+                    "name",
+                )
 
             if payload.get("leader_id"):
                 leader_id = self._normalize_uuid(
@@ -385,7 +716,9 @@ class OwnerAIService:
                 updates["leader_id"] = None
 
             if not updates:
-                raise ValueError("Không có thông tin Group cần cập nhật.")
+                raise ValueError(
+                    "Không có thông tin Group cần cập nhật."
+                )
 
             return {
                 "group_id": group_id,
@@ -397,7 +730,10 @@ class OwnerAIService:
         # -------------------------------------------------
 
         if action_type == "member_invite":
-            allowed = {"email", "name_tag"}
+            allowed = {
+                "email",
+                "name_tag",
+            }
             self._check_allowed_keys(payload, allowed)
 
             email = payload.get("email")
@@ -405,30 +741,46 @@ class OwnerAIService:
 
             if bool(email) == bool(name_tag):
                 raise ValueError(
-                    "Phải cung cấp chính xác một trong hai: email hoặc name_tag."
+                    "Phải cung cấp chính xác một trong hai: "
+                    "email hoặc name_tag."
                 )
 
             if email is not None:
-                if not isinstance(email, str) or "@" not in email:
-                    raise ValueError("Email mời thành viên không hợp lệ.")
+                if (
+                    not isinstance(email, str)
+                    or "@" not in email
+                ):
+                    raise ValueError(
+                        "Email mời thành viên không hợp lệ."
+                    )
 
                 email = email.strip().lower()
 
                 if len(email) > 255:
-                    raise ValueError("Email vượt quá 255 ký tự.")
+                    raise ValueError(
+                        "Email vượt quá 255 ký tự."
+                    )
 
             if name_tag is not None:
                 if not isinstance(name_tag, str):
-                    raise ValueError("Name Tag không hợp lệ.")
+                    raise ValueError(
+                        "Name Tag không hợp lệ."
+                    )
 
-                name_tag = name_tag.strip().upper().removeprefix("#")
+                name_tag = (
+                    name_tag.strip()
+                    .upper()
+                    .removeprefix("#")
+                )
 
                 if (
                     len(name_tag) != 4
                     or not name_tag.isascii()
                     or not name_tag.isalnum()
                 ):
-                    raise ValueError("Name Tag phải có dạng #ABCD.")
+                    raise ValueError(
+                        "Name Tag phải có dạng #ABCD."
+                    )
 
                 name_tag = f"#{name_tag}"
 
@@ -443,7 +795,10 @@ class OwnerAIService:
         # -------------------------------------------------
 
         if action_type == "member_role_update":
-            allowed = {"user_id", "role"}
+            allowed = {
+                "user_id",
+                "role",
+            }
             self._check_allowed_keys(payload, allowed)
 
             user_id = self._normalize_uuid(
@@ -458,7 +813,6 @@ class OwnerAIService:
 
             role = payload.get("role")
 
-            # Owner không thể bị AI tự ý thay đổi quyền.
             if role not in {"member", "leader"}:
                 raise ValueError(
                     "Vai trò mới chỉ được là member hoặc leader."
@@ -485,6 +839,7 @@ class OwnerAIService:
                 payload.get("start_date"),
                 "start_date",
             )
+
             end_date = self._validate_date(
                 payload.get("end_date"),
                 "end_date",
@@ -507,9 +862,10 @@ class OwnerAIService:
                     "Kế hoạch tuần phải có ít nhất một Task."
                 )
 
-            if len(items) > 30:
+            if len(items) > self.MAX_TASKS_PER_PROPOSAL:
                 raise ValueError(
-                    "Một kế hoạch tuần không được vượt quá 30 Task."
+                    "Một kế hoạch tuần không được vượt quá "
+                    f"{self.MAX_TASKS_PER_PROPOSAL} Task."
                 )
 
             validated_tasks = []
@@ -533,7 +889,10 @@ class OwnerAIService:
                 )
 
                 task = {
-                    "title": self._require_text(item, "title"),
+                    "title": self._require_text(
+                        item,
+                        "title",
+                    ),
                     "description": item.get("description"),
                     "priority": item.get("priority", "medium"),
                     "deadline": self._validate_date(
@@ -565,7 +924,8 @@ class OwnerAIService:
 
                     if group_id not in groups:
                         raise ValueError(
-                            f"Group của Task thứ {index} không thuộc dự án."
+                            f"Group của Task thứ {index} "
+                            "không thuộc dự án."
                         )
 
                     task["group_id"] = group_id
@@ -578,7 +938,8 @@ class OwnerAIService:
 
                     if user_id not in members:
                         raise ValueError(
-                            f"Người được giao Task thứ {index} không thuộc dự án."
+                            f"Người được giao Task thứ {index} "
+                            "không thuộc dự án."
                         )
 
                     task["assignee_id"] = user_id
@@ -591,10 +952,12 @@ class OwnerAIService:
                 "tasks": validated_tasks,
             }
 
-        raise ValueError("Không thể kiểm tra loại hành động này.")
+        raise ValueError(
+            "Không thể kiểm tra loại hành động này."
+        )
 
     # =====================================================
-    # 4. SYSTEM PROMPT
+    # 5. SYSTEM PROMPT
     # =====================================================
 
     @staticmethod
@@ -632,11 +995,12 @@ NHIỆM VỤ:
 7. Đề xuất tạo hoặc cập nhật Task và Group.
 8. Đề xuất mời thành viên hoặc thay đổi vai trò.
 9. Đề xuất kế hoạch Task theo tuần.
+10. Đề xuất khởi tạo cấu trúc dự án gồm nhiều Group và Task.
 
 NGUỒN DỮ LIỆU:
 - PROJECT_CONTEXT là dữ liệu thực tế của dự án.
 - APPROVED_KNOWLEDGE là Knowledge đã được duyệt.
-- Không tự tạo số liệu, thành viên, Task hoặc Group.
+- Không tự tạo số liệu, thành viên, Task hoặc Group hiện có.
 - Không khẳng định một Task quá hạn nếu không có đủ dữ liệu ngày tháng.
 - Nếu thiếu dữ liệu, phải nói rõ giới hạn phân tích.
 
@@ -666,6 +1030,7 @@ CÁC action_type ĐƯỢC HỖ TRỢ:
 - member_invite
 - member_role_update
 - weekly_schedule_create
+- project_setup_create
 
 ĐỊNH DẠNG ĐẦU RA:
 Luôn trả về duy nhất một JSON object hợp lệ.
@@ -691,18 +1056,75 @@ Nếu tạo đề xuất:
 }}
 
 QUY TẮC PAYLOAD:
-- task_create: title, description, priority, deadline, assignee_id, group_id.
-- task_update: task_id và các trường cần cập nhật.
-- group_create: name, leader_id.
-- group_update: group_id và các trường cần cập nhật.
-- member_invite: email hoặc name_tag.
-- member_role_update: user_id, role (member hoặc leader).
-- weekly_schedule_create: start_date, end_date, tasks.
+
+- task_create:
+  + Nếu tạo một Task: payload là một JSON object.
+  + Nếu tạo nhiều Task: payload là một JSON array.
+  + Mỗi Task chỉ được chứa:
+    title, description, priority, deadline, assignee_id, group_id.
+  + deadline phải có định dạng YYYY-MM-DD.
+  + priority chỉ được là low, medium hoặc high.
+  + assignee_id phải là UUID thành viên thực tế trong PROJECT_CONTEXT.
+  + group_id phải là UUID Group thực tế trong PROJECT_CONTEXT.
+  + Nếu không biết người thực hiện hoặc Group, sử dụng null.
+  + Không tự tạo UUID.
+
+- task_update:
+  + Gồm task_id và các trường cần cập nhật.
+  + task_id phải là UUID Task thực tế trong PROJECT_CONTEXT.
+
+- group_create:
+  + Gồm name và leader_id.
+  + leader_id là UUID thành viên thực tế hoặc null.
+
+- group_update:
+  + Gồm group_id và các trường cần cập nhật.
+  + group_id phải là UUID Group thực tế trong PROJECT_CONTEXT.
+
+- member_invite:
+  + Chỉ cung cấp email hoặc name_tag.
+
+- member_role_update:
+  + Gồm user_id và role.
+  + role chỉ được là member hoặc leader.
+
+- weekly_schedule_create:
+  + Gồm start_date, end_date và tasks.
+  + Mỗi Task chỉ được thuộc một Group hiện có trong PROJECT_CONTEXT
+    thông qua group_id, hoặc không có Group nếu chưa xác định.
+
+- project_setup_create:
+  + Dùng khi Owner muốn khởi tạo cấu trúc dự án gồm nhiều Group
+    và nhiều Task trong một lần duyệt.
+  + payload phải là một JSON object gồm hai mảng: groups và tasks.
+  + groups phải có ít nhất một Group.
+  + Mỗi Group chỉ chứa: key, name, leader_id.
+  + key là mã tham chiếu duy nhất trong đề xuất, ví dụ frontend,
+    backend, testing. key không phải UUID.
+  + leader_id phải là UUID thành viên thực tế trong PROJECT_CONTEXT
+    hoặc null nếu chưa xác định Leader.
+  + tasks phải có ít nhất một Task.
+  + Mỗi Task chỉ chứa: title, description, priority, deadline,
+    assignee_id, group_key.
+  + group_key là bắt buộc và phải khớp key của một Group
+    trong cùng payload.
+  + Không sử dụng group_id cho Task thuộc Group mới.
+  + assignee_id phải là UUID thành viên thực tế trong PROJECT_CONTEXT
+    hoặc null nếu Owner chưa chỉ định người thực hiện.
+  + Không tạo Task không có Group trong hành động này.
+  + Không tự tạo UUID.
+
+QUY TẮC CHUNG:
 - Chỉ sử dụng UUID thực tế xuất hiện trong PROJECT_CONTEXT.
 - Không tự tạo UUID.
 - Không tự tạo ID thành viên, Group hoặc Task.
 - Không thêm trường ngoài cấu trúc được hỗ trợ.
 - Khi không đủ dữ liệu để tạo đề xuất, hãy trả về clarification.
+- Nếu Owner yêu cầu tạo cả Group và Task mới, ưu tiên
+  project_setup_create thay vì tách thành nhiều đề xuất riêng.
+- Mỗi Task trong project_setup_create phải được gắn đúng group_key.
+- Không dùng tên Group thay cho group_key.
+- Không được tạo Task thuộc một Group không nằm trong payload.
 
 ========== PROJECT_CONTEXT ==========
 {project_data}
@@ -712,7 +1134,7 @@ QUY TẮC PAYLOAD:
 """
 
     # =====================================================
-    # 5. MAIN ANSWER
+    # 6. MAIN ANSWER
     # =====================================================
 
     async def answer(
@@ -737,15 +1159,19 @@ QUY TẮC PAYLOAD:
         """
 
         if not isinstance(message, str) or not message.strip():
-            raise ValueError("Nội dung tin nhắn không được để trống.")
+            raise ValueError(
+                "Nội dung tin nhắn không được để trống."
+            )
 
         message = message.strip()
 
         if len(message) > self.MAX_MESSAGE_LENGTH:
-            raise ValueError("Tin nhắn vượt quá giới hạn cho phép.")
+            raise ValueError(
+                "Tin nhắn vượt quá giới hạn cho phép."
+            )
 
         # -------------------------------------------------
-        # 5.1. KIỂM TRA QUYỀN OWNER
+        # 6.1. KIỂM TRA QUYỀN OWNER
         # -------------------------------------------------
 
         permissions = await get_project_ai_permissions(
@@ -760,7 +1186,7 @@ QUY TẮC PAYLOAD:
             )
 
         # -------------------------------------------------
-        # 5.2. LẤY PROJECT CONTEXT
+        # 6.2. LẤY PROJECT CONTEXT
         # -------------------------------------------------
 
         project_context = await build_project_context(
@@ -785,7 +1211,7 @@ QUY TẮC PAYLOAD:
             )
 
         # -------------------------------------------------
-        # 5.3. LẤY KNOWLEDGE
+        # 6.3. LẤY KNOWLEDGE
         # -------------------------------------------------
 
         knowledge = await get_approved_knowledge(
@@ -795,7 +1221,7 @@ QUY TẮC PAYLOAD:
         )
 
         # -------------------------------------------------
-        # 5.4. SYSTEM PROMPT
+        # 6.4. SYSTEM PROMPT
         # -------------------------------------------------
 
         system_prompt = self._build_system_prompt(
@@ -811,7 +1237,7 @@ QUY TẮC PAYLOAD:
         ]
 
         # -------------------------------------------------
-        # 5.5. HISTORY
+        # 6.5. HISTORY
         # -------------------------------------------------
 
         if history:
@@ -838,7 +1264,7 @@ QUY TẮC PAYLOAD:
         })
 
         # -------------------------------------------------
-        # 5.6. GỌI OLLAMA
+        # 6.6. GỌI OLLAMA
         # -------------------------------------------------
 
         response = await self.provider.generate(
@@ -848,7 +1274,7 @@ QUY TẮC PAYLOAD:
         )
 
         # -------------------------------------------------
-        # 5.7. PARSE RESPONSE
+        # 6.7. PARSE RESPONSE
         # -------------------------------------------------
 
         data = self._extract_json(response)
@@ -864,7 +1290,7 @@ QUY TẮC PAYLOAD:
         content = content.strip()
 
         # -------------------------------------------------
-        # 5.8. NORMAL ANSWER
+        # 6.8. NORMAL ANSWER
         # -------------------------------------------------
 
         if response_type == "answer":
@@ -874,7 +1300,7 @@ QUY TẮC PAYLOAD:
             }
 
         # -------------------------------------------------
-        # 5.9. CLARIFICATION
+        # 6.9. CLARIFICATION
         # -------------------------------------------------
 
         if response_type == "clarification":
@@ -884,7 +1310,7 @@ QUY TẮC PAYLOAD:
             }
 
         # -------------------------------------------------
-        # 5.10. ACTION PROPOSAL
+        # 6.10. ACTION PROPOSAL
         # -------------------------------------------------
 
         if response_type == "action_proposal":

@@ -20,6 +20,7 @@ OwnerAIActionType = Literal[
     "member_invite",
     "member_role_update",
     "weekly_schedule_create",
+    "project_setup_create",
 ]
 
 OwnerAIProposalStatus = Literal[
@@ -76,7 +77,10 @@ class OwnerAIMessageResponse(BaseModel):
     conversation_id: UUID
     role: str
     content: str
+
+    # Nguồn dữ liệu có thể là JSON object hoặc array.
     sources: dict | list | None = None
+
     created_at: datetime
 
 
@@ -106,7 +110,12 @@ class OwnerAIActionProposalResponse(BaseModel):
 
     action_type: OwnerAIActionType
 
-    payload: dict
+    # JSONB có thể chứa object hoặc array.
+    # Ví dụ:
+    # - task_create: object hoặc danh sách task.
+    # - group_create: object hoặc danh sách group.
+    # - project_setup_create: object gồm groups và tasks.
+    payload: dict | list
 
     status: OwnerAIProposalStatus
 
@@ -176,8 +185,13 @@ class OwnerAIExecutionLogResponse(BaseModel):
 
     status: OwnerAIExecutionStatus
 
-    request_payload: dict | None = None
+    # Sửa lỗi ResponseValidationError:
+    # request_payload trong PostgreSQL JSONB có thể là object
+    # hoặc danh sách các task/group.
+    request_payload: dict | list | None = None
+
     result: dict | None = None
+
     error_message: str | None = None
 
     created_at: datetime

@@ -178,7 +178,7 @@ class OwnerAIActionProposal(Base):
 
     # Dữ liệu AI đề xuất.
     # Backend phải kiểm tra lại toàn bộ payload trước khi thực hiện.
-    payload: Mapped[dict] = mapped_column(
+    payload: Mapped[dict | list] = mapped_column(
         JSONB,
         nullable=False,
     )

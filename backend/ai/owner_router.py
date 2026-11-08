@@ -1,3 +1,4 @@
+
 """API hội thoại riêng tư dành cho Owner AI."""
 
 import uuid
@@ -44,6 +45,165 @@ router = APIRouter(
 
 
 # =====================================================
+# CONSTANTS
+# =====================================================
+
+ALLOWED_OWNER_ACTIONS = {
+    "task_create",
+    "task_update",
+    "group_create",
+    "group_update",
+    "member_invite",
+    "member_role_update",
+    "weekly_schedule_create",
+    "project_setup_create",
+}
+
+MAX_TASKS_PER_PROPOSAL = 30
+
+
+# =====================================================
+# COMMON HELPERS
+# =====================================================
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def serialize_json_value(value):
+    """
+    Chuyển dữ liệu UUID và datetime về dạng JSON-compatible.
+    """
+
+    if isinstance(value, uuid.UUID):
+        return str(value)
+
+    if isinstance(value, datetime):
+        return value.isoformat()
+
+    if isinstance(value, dict):
+        return {
+            str(key): serialize_json_value(item)
+            for key, item in value.items()
+        }
+
+    if isinstance(value, list):
+        return [
+            serialize_json_value(item)
+            for item in value
+        ]
+
+    return value
+
+
+def validate_proposal_payload(
+    action_type: str,
+    proposal_payload,
+):
+    """
+    Kiểm tra cấu trúc payload trước khi lưu proposal.
+
+    Validation nghiệp vụ chi tiết vẫn được thực hiện
+    trong OwnerAIService và OwnerAIActionExecutor.
+    """
+
+    if action_type not in ALLOWED_OWNER_ACTIONS:
+        raise HTTPException(
+            status_code=422,
+            detail="Loại hành động Owner AI không được hỗ trợ.",
+        )
+
+    if action_type == "task_create":
+
+        if isinstance(proposal_payload, dict):
+            if not proposal_payload:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Payload tạo Task không được để trống.",
+                )
+
+            return
+
+        if isinstance(proposal_payload, list):
+
+            if not proposal_payload:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Danh sách Task không được để trống.",
+                )
+
+            if len(proposal_payload) > MAX_TASKS_PER_PROPOSAL:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"Một đề xuất không được vượt quá "
+                        f"{MAX_TASKS_PER_PROPOSAL} Task."
+                    ),
+                )
+
+            if not all(
+                isinstance(item, dict)
+                for item in proposal_payload
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Danh sách Task chứa dữ liệu không hợp lệ.",
+                )
+
+            return
+
+        raise HTTPException(
+            status_code=422,
+            detail="Payload tạo Task không hợp lệ.",
+        )
+
+    # Các hành động khác sử dụng payload dạng object.
+    if not isinstance(proposal_payload, dict):
+        raise HTTPException(
+            status_code=422,
+            detail="Payload đề xuất phải là object.",
+        )
+
+    if not proposal_payload:
+        raise HTTPException(
+            status_code=422,
+            detail="Payload đề xuất không được để trống.",
+        )
+
+    if action_type == "project_setup_create":
+
+        groups = proposal_payload.get("groups")
+        tasks = proposal_payload.get("tasks")
+
+        if not isinstance(groups, list) or not groups:
+            raise HTTPException(
+                status_code=422,
+                detail="Đề xuất tạo dự án phải có ít nhất một nhóm.",
+            )
+
+        if len(groups) > 10:
+            raise HTTPException(
+                status_code=422,
+                detail="Một lần chỉ được tạo tối đa 10 nhóm.",
+            )
+
+        if not isinstance(tasks, list) or not tasks:
+            raise HTTPException(
+                status_code=422,
+                detail="Đề xuất tạo nhóm phải có ít nhất một Task.",
+            )
+
+        if len(tasks) > MAX_TASKS_PER_PROPOSAL:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Một lần chỉ được tạo tối đa "
+                    f"{MAX_TASKS_PER_PROPOSAL} Task."
+                ),
+            )
+
+
+# =====================================================
 # 1. KIỂM TRA QUYỀN OWNER
 # =====================================================
 
@@ -72,7 +232,7 @@ async def require_owner(
             detail="Không thể kiểm tra quyền truy cập Owner AI.",
         )
 
-    if not permissions.get("is_owner"):
+    if not permissions or not permissions.get("is_owner"):
         raise HTTPException(
             status_code=403,
             detail="Chỉ chủ dự án mới được sử dụng Owner AI.",
@@ -350,18 +510,24 @@ async def send_owner_message(
         )
 
     except PermissionError:
+        await db.rollback()
+
         raise HTTPException(
             status_code=403,
             detail="Bạn không có quyền sử dụng Owner AI.",
         )
 
     except ValueError as error:
+        await db.rollback()
+
         raise HTTPException(
             status_code=422,
             detail=str(error),
         )
 
     except Exception as error:
+        await db.rollback()
+
         print(f"Owner AI service error: {error}")
 
         raise HTTPException(
@@ -397,7 +563,11 @@ async def send_owner_message(
     # 7.4. KIỂM TRA ĐỀ XUẤT
     # -------------------------------------------------
 
+    action_type = None
+    proposal_payload = None
+
     if proposal_data is not None:
+
         if not isinstance(proposal_data, dict):
             raise HTTPException(
                 status_code=422,
@@ -413,11 +583,10 @@ async def send_owner_message(
                 detail="Thiếu loại hành động trong đề xuất.",
             )
 
-        if not isinstance(proposal_payload, dict):
-            raise HTTPException(
-                status_code=422,
-                detail="Payload đề xuất không hợp lệ.",
-            )
+        validate_proposal_payload(
+            action_type,
+            proposal_payload,
+        )
 
     # -------------------------------------------------
     # 7.5. LƯU MESSAGE VÀ PROPOSAL
@@ -446,13 +615,16 @@ async def send_owner_message(
         proposal = None
 
         if proposal_data is not None:
+
             proposal = OwnerAIActionProposal(
                 conversation_id=conversation.id,
                 message_id=assistant_message.id,
                 project_id=project_id,
                 owner_id=current_user.id,
                 action_type=action_type,
-                payload=proposal_payload,
+                payload=serialize_json_value(
+                    proposal_payload
+                ),
                 status="pending",
             )
 
@@ -467,7 +639,7 @@ async def send_owner_message(
                 "status": proposal.status,
             }
 
-        conversation.updated_at = datetime.now(timezone.utc)
+        conversation.updated_at = utc_now()
 
         await db.commit()
 
@@ -581,6 +753,7 @@ async def list_owner_proposals(
 
     return result.scalars().all()
 
+
 # =====================================================
 # 10. OWNER DUYỆT HOẶC TỪ CHỐI ĐỀ XUẤT
 # =====================================================
@@ -597,7 +770,6 @@ async def review_owner_proposal(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    # Chỉ Owner thực tế được duyệt đề xuất.
     await require_owner(
         db,
         project_id,
@@ -611,7 +783,6 @@ async def review_owner_proposal(
         current_user.id,
     )
 
-    # Khóa bản ghi để tránh hai yêu cầu duyệt đồng thời.
     proposal = await get_owned_proposal(
         db,
         project_id,
@@ -630,15 +801,14 @@ async def review_owner_proposal(
             ),
         )
 
-    now = datetime.now(timezone.utc)
-
-    if payload.action == "approve":
-        proposal.status = "approved"
-    else:
-        proposal.status = "rejected"
+    proposal.status = (
+        "approved"
+        if payload.action == "approve"
+        else "rejected"
+    )
 
     proposal.reviewed_by = current_user.id
-    proposal.reviewed_at = now
+    proposal.reviewed_at = utc_now()
 
     try:
         await db.commit()
@@ -706,21 +876,22 @@ async def execute_owner_proposal(
         raise HTTPException(
             status_code=409,
             detail=(
-                "Đề xuất phải được Owner duyệt trước "
-                "khi thực thi. Đề xuất hiện tại có trạng thái: "
-                f"{proposal.status}."
+                "Đề xuất phải được Owner duyệt trước khi thực thi. "
+                f"Trạng thái hiện tại: {proposal.status}."
             ),
         )
 
-    # Lưu lại dữ liệu trước khi thực thi để sử dụng khi ghi log.
-    request_payload = dict(proposal.payload or {})
     action_type = proposal.action_type
+
+    request_payload = serialize_json_value(
+        proposal.payload
+    )
+
+    executor = OwnerAIActionExecutor(db)
 
     # -------------------------------------------------
     # 11.3. THỰC THI ACTION
     # -------------------------------------------------
-
-    executor = OwnerAIActionExecutor(db)
 
     try:
         result = await executor.execute(
@@ -733,9 +904,11 @@ async def execute_owner_proposal(
                 "data": str(result),
             }
 
+        result = serialize_json_value(result)
+
         proposal.status = "executed"
         proposal.result = result
-        proposal.executed_at = datetime.now(timezone.utc)
+        proposal.executed_at = utc_now()
 
         execution_log = OwnerAIExecutionLog(
             proposal_id=proposal.id,
@@ -750,12 +923,11 @@ async def execute_owner_proposal(
 
         db.add(execution_log)
 
-        # Lưu dữ liệu nghiệp vụ, proposal và execution log
-        # trong cùng một transaction.
+        # Dữ liệu nghiệp vụ, proposal và log cùng transaction.
         await db.commit()
 
         return OwnerAIExecutionResponse(
-            proposal_id=proposal.id,
+            proposal_id=proposal_id,
             status="executed",
             result=result,
             message="Đề xuất đã được thực thi thành công.",
@@ -764,7 +936,7 @@ async def execute_owner_proposal(
     except Exception as error:
 
         # -------------------------------------------------
-        # 11.4. ROLLBACK DỮ LIỆU NGHIỆP VỤ NẾU THẤT BẠI
+        # 11.4. ROLLBACK DỮ LIỆU NGHIỆP VỤ
         # -------------------------------------------------
 
         await db.rollback()
@@ -773,19 +945,18 @@ async def execute_owner_proposal(
 
         if isinstance(error, HTTPException):
             error_message = str(error.detail)
+
         elif isinstance(error, ValueError):
             error_message = str(error)
+
         else:
-            # Không trả chi tiết lỗi nội bộ cho client.
             error_message = "Backend không thể thực thi đề xuất."
 
         # -------------------------------------------------
-        # 11.5. GHI NHẬN TRẠNG THÁI THẤT BẠI
+        # 11.5. GHI NHẬN THẤT BẠI
         # -------------------------------------------------
 
         try:
-            # Sau rollback phải truy vấn lại proposal.
-            # Không sử dụng object cũ vì transaction đã rollback.
             failed_proposal = await get_owned_proposal(
                 db,
                 project_id,
@@ -795,9 +966,10 @@ async def execute_owner_proposal(
                 lock=True,
             )
 
-            # Chỉ đánh dấu failed nếu proposal vẫn đang approved.
             if failed_proposal.status == "approved":
+
                 failed_proposal.status = "failed"
+
                 failed_proposal.result = {
                     "error": error_message,
                 }
@@ -871,7 +1043,6 @@ async def list_owner_execution_logs(
         current_user.id,
     )
 
-    # Chỉ lấy log thuộc những proposal trong hội thoại này.
     proposal_ids_result = await db.execute(
         select(OwnerAIActionProposal.id).where(
             OwnerAIActionProposal.conversation_id == conversation.id,
